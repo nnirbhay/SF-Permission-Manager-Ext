@@ -1,0 +1,269 @@
+/* =================================================================== */
+/* == 1. NOTIFICATION ICONS (SVG MASK)                            == */
+/* =================================================================== */
+
+.icon {
+   display: inline-block;
+   width: 1.2em;
+   height: 1.2em;
+   vertical-align: middle;
+   background-color: currentColor; /* Inherits text color */
+   -webkit-mask-size: 100% 100%;
+   mask-size: 100% 100%;
+   -webkit-mask-repeat: no-repeat;
+   mask-repeat: no-repeat;
+   -webkit-mask-position: center;
+   mask-position: center;
+
+   svg{
+      width: 16px;
+      height: 16px;
+   }
+}
+
+.icon-info-circle {
+   -webkit-mask-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z'/%3E%3C/svg%3E");
+   mask-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z'/%3E%3C/svg%3E");
+}
+
+.icon-check-circle {
+   -webkit-mask-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM9.29 16.29L5.7 12.7c-.39-.39-.39-1.02 0-1.41.39-.39 1.02-.39 1.41 0L10 14.17l6.88-6.88c.39-.39 1.02-.39 1.41 0 .39.39.39 1.02 0 1.41l-7.59 7.59c-.38.39-1.02.39-1.41 0z'/%3E%3C/svg%3E");
+   mask-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM9.29 16.29L5.7 12.7c-.39-.39-.39-1.02 0-1.41.39-.39 1.02-.39 1.41 0L10 14.17l6.88-6.88c.39-.39 1.02-.39 1.41 0 .39.39.39 1.02 0 1.41l-7.59 7.59c-.38.39-1.02.39-1.41 0z'/%3E%3C/svg%3E");
+}
+
+.icon-warning-triangle {
+   -webkit-mask-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z'/%3E%3C/svg%3E");
+   mask-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z'/%3E%3C/svg%3E");
+}
+
+.icon-error-circle {
+   -webkit-mask-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z'/%3E%3C/svg%3E");
+   mask-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z'/%3E%3C/svg%3E");
+}
+
+/* =================================================================== */
+/* == 2. NOTIFICATION CONTAINERS                                  == */
+/* =================================================================== */
+
+.notification-container {
+   position: fixed;
+   z-index: 999999999;
+   display: flex;
+   flex-direction: column;
+   width: 90%;
+   max-width: 380px; /* Max width for toasts */
+}
+
+.notification-container .notification {
+   margin-bottom: 12px;
+}
+
+/* Positioning */
+.notification-container--top-left {
+   top: 20px;
+   left: 20px;
+}
+.notification-container--top-right {
+   top: 20px;
+   right: 20px;
+}
+.notification-container--top-center {
+   top: 20px;
+   left: 50%;
+   transform: translateX(-50%);
+   align-items: center;
+}
+.notification-container--bottom-left {
+   bottom: 20px;
+   left: 20px;
+}
+.notification-container--bottom-right {
+   bottom: 20px;
+   right: 20px;
+}
+.notification-container--bottom-center {
+   bottom: 20px;
+   left: 50%;
+   transform: translateX(-50%);
+   align-items: center;
+}
+
+/* =================================================================== */
+/* == 3. NOTIFICATION BASE & VARIANTS                             == */
+/* =================================================================== */
+
+.notification {
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: 12px;
+   background: #333;
+   color: white;
+   padding: 16px;
+   border-radius: 6px;
+   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+   width: 100%;
+   box-sizing: border-box; /* Important */
+   font-family: Verdana, Geneva, sans-serif !important;
+}
+
+/* Variant: Snackbar */
+.notification--snackbar {
+   max-width: 500px; /* Snackbars can be wider */
+   background: #222;
+}
+
+/* =================================================================== */
+/* == 4. NOTIFICATION TYPES (COLORS)                              == */
+/* =================================================================== */
+
+.notification--info {
+   background-color: #007bff;
+   color: white;
+}
+.notification--success {
+   background-color: #28a745;
+   color: white;
+}
+.notification--warning {
+   background-color: #ffc107;
+   color: #333;
+   svg{
+      fill: currentColor;
+   }
+}
+.notification--error {
+   background-color: #dc3545;
+   color: white;
+}
+
+/* =================================================================== */
+/* == 5. INTERNAL ELEMENTS                                        == */
+/* =================================================================== */
+
+.notification__icon-wrapper {
+
+   svg{
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      min-height: 24px;
+   }
+
+   .notification--warning svg{
+      fill: currentColor;
+   }
+}
+
+.notification__content {
+   min-width: 0;
+   display: flex;
+   width: 100%;
+   align-items: center;
+   justify-content: space-between;
+   gap: 12px;
+}
+
+.notification__message {
+   margin: 0;
+   padding: 0;
+   word-wrap: break-word; /* Prevents long text from breaking layout */
+   flex-grow: 1;
+}
+
+.notification__buttons {
+   display: flex;
+   justify-content: flex-end;
+   gap: 8px;
+   width: 100%;
+   /* padding-inline: 46px; */
+}
+
+.notification__button {
+   background: transparent;
+   border: none;
+   color: inherit; /* Inherits color (white, or black for warning) */
+   font-weight: bold;
+   text-transform: uppercase;
+   padding: 6px 10px;
+   margin: 0;
+   cursor: pointer;
+   border-radius: 4px;
+   font-size: 0.9em;
+   opacity: 0.8;
+   transition: opacity 0.2s, background-color 0.2s;
+}
+.notification__button:hover {
+   opacity: 1;
+   background: rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure buttons on light backgrounds (warning) are readable */
+.notification--warning .notification__button {
+   color: #333;
+}
+.notification--warning .notification__button:hover {
+   background: rgba(0, 0, 0, 0.05);
+}
+
+/* Default "OK" button style */
+.notification__button--ok {
+   opacity: 1;
+}
+
+/* Close (X) button for sticky notifications */
+.notification__close-button {
+   background: transparent;
+   border: none;
+   color: inherit;
+   cursor: pointer;
+   opacity: 0.7;
+   flex-shrink: 0;
+   transition: opacity 0.2s;
+
+   svg{
+      width: 20px;
+      height: 20px;
+      min-width: 20px;
+      min-height: 20px;
+   }
+
+}
+.notification__close-button:hover {
+   opacity: 1;
+}
+
+/* =================================================================== */
+/* == 6. ANIMATIONS (TRANSITIONS)                                 == */
+/* =================================================================== */
+
+.notification {
+   transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+   opacity: 0;
+}
+
+/* --- Entry Animations --- */
+
+/* Default (Top positions) */
+.notification-container[class*="top-"] .notification {
+   transform: translateY(-20px);
+}
+.notification-container[class*="top-"] .notification.is-entering {
+   opacity: 1;
+   transform: translateY(0);
+}
+
+/* Bottom positions */
+.notification-container[class*="bottom-"] .notification {
+   transform: translateY(20px);
+}
+.notification-container[class*="bottom-"] .notification.is-entering {
+   opacity: 1;
+   transform: translateY(0);
+}
+
+/* --- Exit Animations --- */
+.notification.is-exiting {
+   opacity: 0;
+   transform: translateY(10px); /* A slight dip on the way out */
+}

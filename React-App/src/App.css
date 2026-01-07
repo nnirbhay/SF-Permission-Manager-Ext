@@ -1,0 +1,158 @@
+/* Layout Constraints */
+#root {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.main-app {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  color: var(--color-b-1);
+  width: 100%;
+  height: 100%;
+}
+
+.app-header {
+  height: 60px;
+  background: linear-gradient(90deg, #0d1b2a 0%, #1b263b 100%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.left-panel {
+  border-right: 1px solid #e2e8f0;
+}
+
+/* Scrollbar Utility for smooth behavior */
+.of-y-a::-webkit-scrollbar {
+  width: 6px;
+}
+
+.of-y-a::-webkit-scrollbar-thumb {
+  background: #cbd5e0;
+  border-radius: 10px;
+}
+
+.of-y-a::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Visibility Fixes */
+.c-b-1 {
+  color: #2d3748 !important;
+}
+
+.c-b-2 {
+  color: #4a5568 !important;
+}
+
+.c-b-3 {
+  color: #718096 !important;
+}
+
+/* Toggles */
+.source-toggle {
+  margin-bottom: 4px;
+  background: white;
+  border: 1px solid #edf2f7;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.source-toggle:hover {
+  border-color: var(--primary-color-medium);
+  transform: translateX(2px);
+}
+
+.source-toggle.active {
+  background: var(--primary-color-light);
+  border-color: var(--primary-color-medium);
+  box-shadow: 0 2px 4px rgba(0, 161, 224, 0.1);
+}
+
+.source-toggle.active span {
+  color: var(--primary-color-medium);
+  font-weight: 600;
+}
+
+/* Accordion Styling */
+.accordion-item {
+  transition: all 0.2s;
+}
+
+.accordion-item:hover {
+  border-color: #cbd5e0;
+}
+
+.accordion-header {
+  background: #fff;
+}
+
+.accordion-header:hover {
+  background: #f8fafc;
+}
+
+/* Perm Badges */
+.perm-badge {
+  border: 1px solid #e2e8f0;
+  color: #718096;
+  background: #fff;
+  min-width: 85px;
+  text-align: center;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.perm-badge.active-green {
+  background: #f0fff4;
+  border-color: #9ae6b4;
+  color: #276749;
+}
+
+.perm-badge.active-blue {
+  background: #ebf8ff;
+  border-color: #90cdf4;
+  color: #2c5282;
+}
+
+.perm-badge.inactive {
+  opacity: 0.4;
+  background: #f7fafc;
+  border-style: dashed;
+}
+
+.shadow-s {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* Ant Overrides */
+.ant-table-thead>tr>th {
+  background: #f7fafc !important;
+  font-weight: 700 !important;
+  color: #4a5568 !important;
+}
+
+.ant-select-selector {
+  height: 38px !important;
+  display: flex !important;
+  align-items: center !important;
+  border-radius: 6px !important;
+}
+
+.animate-in {
+  animation: fadeInSlide 0.25s ease-out;
+}
+
+@keyframes fadeInSlide {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.border-b {
+  border-bottom: 1px solid #edf2f7;
+  margin-bottom: 8px;
+}

@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Dev - Salesforce Permission Manager",
+  "version": "0.1.0",
+  "description": "Salesforce Permission Manager to easily manage permissions in Salesforce Org.",
+  "action": {
+    "default_popup": "index.html"
+  },
+  "permissions": [
+    "cookies"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "host_permissions": [
+    "https://*.force.com/*",
+    "https://*.salesforce.com/*",
+    "https://*.builder.salesforce-experience.com/*",
+    "https://*.salesforce-setup.com/*"
+  ]
+}
