@@ -1,12 +1,12 @@
 
 import { useState, useEffect, useMemo } from 'react';
-import { Select, Spin, Tag, message, Input, Popover, Avatar, Divider, Table } from 'antd';
-import { UserOutlined, SafetyCertificateOutlined, CloudServerOutlined, CopyOutlined, CloudOutlined, FilterOutlined, DownOutlined, UpOutlined, ReloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
+import { Select, Spin, Tag, message, Input, Popover, Avatar, Divider, Table, Switch } from 'antd';
+import { UserOutlined, SafetyCertificateOutlined, CloudServerOutlined, CopyOutlined, CloudOutlined, FilterOutlined, DownOutlined, UpOutlined, ReloadOutlined, ExclamationCircleOutlined, SolutionOutlined, ScheduleOutlined, ClusterOutlined } from '@ant-design/icons';
 import '../../src/utilities/prototypes/prototypes.js';
 import './App.css';
 
 const { Search } = Input;
-const API_VERSION = '60.0';
+const API_VERSION = '65.0';
 
 let orgDomain;
 let sessionId;
@@ -27,6 +27,7 @@ function App() {
     const [lastEvaluatedSources, setLastEvaluatedSources] = useState([]);
     const [needsReEvaluation, setNeedsReEvaluation] = useState(false);
     const [noPermissions, setNoPermissions] = useState(false);
+    const [isMutualMode, setIsMutualMode] = useState(false);
 
     useEffect(() => {
         if (expandedObject) {
@@ -118,36 +119,54 @@ function App() {
         setObjectPermsCache({});
 
         try {
-            const query = `SELECT PermissionSet.Id, PermissionSet.Name, PermissionSet.Label, PermissionSet.IsOwnedByProfile, PermissionSet.Profile.Id, PermissionSet.Profile.Name, PermissionSetGroup.Id, PermissionSetGroup.MasterLabel FROM PermissionSetAssignment WHERE AssigneeId = '${userId}'`;
-            const res = await orgCallout(`/services/data/v${API_VERSION}/query?q=${encodeURIComponent(query)}`);
-            if (!res?.records?.length) {
-                message.warning('No permissions found for the selected user.');
-                setNoPermissions(true);
-                return;
-            }
+            // Composite request for User Assignments and Muting Info
+            const compositeRequest = {
+                allOrNone: true,
+                compositeRequest: [
+                    {
+                        method: "GET", referenceId: "Assignments",
+                        url: `/services/data/v${API_VERSION}/query?q=${encodeURIComponent(`SELECT PermissionSet.Id, PermissionSet.Name, PermissionSet.Label, PermissionSet.IsOwnedByProfile, PermissionSet.Profile.Id, PermissionSet.Profile.Name, PermissionSetGroup.Id, PermissionSetGroup.MasterLabel FROM PermissionSetAssignment WHERE AssigneeId = '${userId}'`)}`
+                    },
+                    {
+                        method: "GET", referenceId: "PSGComponents",
+                        url: `/services/data/v${API_VERSION}/query?q=${encodeURIComponent(`SELECT Id, PermissionSetId, PermissionSetGroupId FROM PermissionSetGroupComponent WHERE PermissionSetGroupId IN (SELECT PermissionSetGroupId FROM PermissionSetAssignment WHERE AssigneeId = '${userId}')`)}`
+                    }
+                ]
+            };
 
-            setNoPermissions(false);
-            const profileAssignemnt = res?.records?.find(r => r.PermissionSet.IsOwnedByProfile) ?? {};
+            const resComp = await orgCallout(`/services/data/v${API_VERSION}/composite`, 'POST', compositeRequest);
+            const assignmentRes = resComp.compositeResponse.find(r => r.referenceId === 'Assignments').body;
+            const PSGComponentsRes = resComp.compositeResponse.find(r => r.referenceId === 'PSGComponents').body;
+
+            const profileAssignemnt = assignmentRes?.records?.find(r => r.PermissionSet.IsOwnedByProfile) ?? {};
             const profile = { ...profileAssignemnt.PermissionSet.Profile, PermissionSet: profileAssignemnt.PermissionSet };
-            console.log('profile : ', profile);
 
-            const assignments = res.records.filter(r => !r.PermissionSet.IsOwnedByProfile && !r.PermissionSetGroup);
+            const assignments = assignmentRes.records.filter(r => !r.PermissionSet.IsOwnedByProfile && !r.PermissionSetGroup);
             const groupsMap = {};
-            res.records.forEach(r => {
+
+            assignmentRes.records.forEach(r => {
                 if (r.PermissionSetGroup) {
-                    if (!groupsMap[r.PermissionSetGroup.Id]) {
-                        groupsMap[r.PermissionSetGroup.Id] = {
-                            Id: r.PermissionSetGroup.Id,
-                            Label: r.PermissionSetGroup.MasterLabel,
-                            PSIds: []
+                    const gid = r.PermissionSetGroup.Id;
+                    if (!groupsMap[gid]) {
+                        groupsMap[gid] = {
+                            Id: gid, Label: r.PermissionSetGroup.MasterLabel,
+                            PSIds: [], MutingPSId: null
                         };
                     }
-                    groupsMap[r.PermissionSetGroup.Id].PSIds.push(r.PermissionSet.Id);
+                    groupsMap[gid].PSIds.push(r.PermissionSet.Id);
+                }
+            });
+
+            PSGComponentsRes.records.forEach(c => {
+                // If the assigned PS is a Muting PS, store its ID
+                if (c.PermissionSetId.startsWith('0QM') && groupsMap[c.PermissionSetGroupId]) {
+                    groupsMap[c.PermissionSetGroupId].MutingPSId = c.PermissionSetId;
                 }
             });
 
             setUserPermissions({ profile, assignments, groups: Object.values(groupsMap) });
         } catch (err) {
+            console.error(err);
             message.error('Error fetching user permissions.');
         }
     };
@@ -159,67 +178,154 @@ function App() {
     };
 
     const getTargetParentIds = () => {
-        if (selectedSources.length === 0) {
-            // collect all premission set ids
-            const ids = userPermissions.assignments.map(a => a.PermissionSet.Id);
-            return [...new Set(ids)];
-        };
+        const groupsConfig = []; // [{psIds: [], muteId: null}]
+        const standaloneIds = [];
+        const profileId = userPermissions.profile?.PermissionSet?.Id;
 
-        const ids = [];
-        selectedSources.forEach(sid => {
-            const group = userPermissions.groups.find(g => g.Id === sid);
-            if (group) {
-                ids.push(...group.PSIds);
-            } else {
-                ids.push(sid);
-            }
-        });
-        return [...new Set(ids)];
+        if (selectedSources.length === 0) {
+            // Apply all
+            if (profileId) standaloneIds.push(profileId);
+            userPermissions.assignments.forEach(a => standaloneIds.push(a.PermissionSet.Id));
+            userPermissions.groups.forEach(g => groupsConfig.push({ psIds: g.PSIds, muteId: g.MutingPSId }));
+        } else {
+            selectedSources.forEach(sid => {
+                const group = userPermissions.groups.find(g => g.Id === sid);
+                if (group) {
+                    groupsConfig.push({ psIds: group.PSIds, muteId: group.MutingPSId });
+                } else if (sid === profileId) {
+                    standaloneIds.push(profileId);
+                } else {
+                    standaloneIds.push(sid);
+                }
+            });
+        }
+        return { groupsConfig, standaloneIds };
     };
 
-    const fetchObjectPermissions = async (object) => {
-        if (objectPermsCache[object.name]) return;
+    const fetchObjectPermissions = async (object, force = false) => {
+        if (!force && objectPermsCache[object.name]) return;
 
         setFetchingDetail(true);
         try {
-            const parentIds = getTargetParentIds();
-            const psIdsStr = parentIds?.map(id => `'${id}'`).join(',') ?? null;
-            const objQuery = `SELECT PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete, PermissionsViewAllRecords, PermissionsModifyAllRecords FROM ObjectPermissions WHERE ${psIdsStr ? `ParentId IN (${psIdsStr}) AND ` : ''} SobjectType = '${object.name}'`;
-            const fieldQuery = `SELECT Field, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE ${psIdsStr ? `ParentId IN (${psIdsStr}) AND ` : ''} SobjectType = '${object.name}'`;
+            const { groupsConfig, standaloneIds } = getTargetParentIds();
+            const allPSIds = new Set(standaloneIds);
+            groupsConfig.forEach(g => {
+                g.psIds.forEach(id => allPSIds.add(id));
+                if (g.muteId) allPSIds.add(g.muteId);
+            });
 
-            const [objRes, fieldRes] = await Promise.all([
+            if (allPSIds.size === 0) return;
+
+            const psIdsStr = Array.from(allPSIds).map(id => `'${id}'`).join(',');
+            const objQuery = `SELECT ParentId, PermissionsCreate, PermissionsRead, PermissionsEdit, PermissionsDelete, PermissionsViewAllRecords, PermissionsModifyAllRecords, PermissionsViewAllFields FROM ObjectPermissions WHERE ParentId IN (${psIdsStr}) AND SobjectType = '${object.name}'`;
+            const fieldQuery = `SELECT ParentId, Field, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE ParentId IN (${psIdsStr}) AND SobjectType = '${object.name}'`;
+
+            const [objRes, fieldRes, describeRes] = await Promise.all([
                 orgCallout(`/services/data/v${API_VERSION}/query?q=${encodeURIComponent(objQuery)}`),
-                orgCallout(`/services/data/v${API_VERSION}/query?q=${encodeURIComponent(fieldQuery)}`)
+                orgCallout(`/services/data/v${API_VERSION}/query?q=${encodeURIComponent(fieldQuery)}`),
+                orgCallout(`/services/data/v${API_VERSION}/sobjects/${object.name}/describe`)
             ]);
 
-            const aggregatedObj = objRes.records.reduce((acc, curr) => ({
-                Read: acc.Read || curr.PermissionsRead,
-                Create: acc.Create || curr.PermissionsCreate,
-                Edit: acc.Edit || curr.PermissionsEdit,
-                Delete: acc.Delete || curr.PermissionsDelete,
-                ViewAll: acc.ViewAll || curr.PermissionsViewAllRecords,
-                ModifyAll: acc.ModifyAll || curr.PermissionsModifyAllRecords,
-            }), { Read: false, Create: false, Edit: false, Delete: false, ViewAll: false, ModifyAll: false });
+            const objMap = {}; // ParentId -> Perms
+            objRes.records.forEach(r => objMap[r.ParentId] = r);
 
-            const fieldMap = {};
+            const fieldMapRaw = {}; // ParentId -> FieldName -> Perms
             fieldRes.records.forEach(f => {
+                if (!fieldMapRaw[f.ParentId]) fieldMapRaw[f.ParentId] = {};
                 const fieldName = f.Field.split('.')[1];
-                if (!fieldMap[fieldName]) fieldMap[fieldName] = { Read: false, Edit: false };
-                fieldMap[fieldName].Read = fieldMap[fieldName].Read || f.PermissionsRead;
-                fieldMap[fieldName].Edit = fieldMap[fieldName].Edit || f.PermissionsEdit;
+                fieldMapRaw[f.ParentId][fieldName] = f;
+            });
+
+            const getEffectiveForGroup = (config, p, isField = false, fName = null) => {
+                let groupGrant = false;
+                config.psIds.forEach(id => {
+                    const rec = isField ? fieldMapRaw[id]?.[fName] : objMap[id];
+                    if (rec) {
+                        const key = isField ? (p === 'Read' ? 'PermissionsRead' : 'PermissionsEdit') : `Permissions${p}`;
+                        if (rec[key]) groupGrant = true;
+                    }
+                });
+
+                let isMuted = false;
+
+                if (config.muteId) {
+                    const muteRec = isField ? fieldMapRaw[config.muteId]?.[fName] : objMap[config.muteId];
+                    if (muteRec) {
+                        const key = isField
+                            ? (p === 'Read' ? 'PermissionsRead' : 'PermissionsEdit')
+                            : `Permissions${p}`;
+                        // In Muting PS, TRUE means MUTED (inverse)
+                        if (muteRec[key]) isMuted = true;
+                    }
+                }
+                return { grant: groupGrant && !isMuted, muted: isMuted };
+            };
+
+            // Prepare Source Labels for hover
+            const sourceLabels = {};
+            if (userPermissions.profile) sourceLabels[userPermissions.profile.PermissionSet.Id] = `Profile: ${userPermissions.profile.Name}`;
+            userPermissions.assignments.forEach(a => sourceLabels[a.PermissionSet.Id] = `PS: ${a.PermissionSet.Label}`);
+            userPermissions.groups.forEach(g => sourceLabels[g.Id] = `PSG: ${g.Label}`);
+
+            const rawObjectResults = {};
+            ['Read', 'Create', 'Edit', 'Delete', 'ViewAllRecords', 'ModifyAllRecords', 'ViewAllFields'].forEach(p => {
+                const resultsPerSource = [];
+                standaloneIds.forEach(id => {
+                    const rec = objMap[id];
+                    let granted = false;
+                    if (rec) {
+                        const key = p === 'ViewAllRecords' ? 'PermissionsViewAllRecords' : (p === 'ModifyAllRecords' ? 'PermissionsModifyAllRecords' : (p === 'ViewAllFields' ? 'PermissionsViewAllFields' : `Permissions${p}`));
+                        if (rec[key]) granted = true;
+                    }
+                    resultsPerSource.push({ label: sourceLabels[id] || 'Unknown', grant: granted, muted: false });
+                });
+
+                groupsConfig.forEach(config => {
+                    const groupResult = getEffectiveForGroup(config, p);
+                    const groupRef = userPermissions.groups.find(g => g.MutingPSId === config.muteId || (config.psIds.includes(g.PSIds[0])));
+                    resultsPerSource.push({ label: groupRef?.Label ? `PSG: ${groupRef.Label}` : 'Permission Set Group', ...groupResult });
+                });
+                rawObjectResults[p] = resultsPerSource;
+            });
+
+            const sourceBreakdown = {};
+            Object.keys(rawObjectResults).forEach(p => {
+                sourceBreakdown[p] = rawObjectResults[p].filter(r => r.grant).map(r => r.label);
+            });
+
+            console.log('describeRes : ', describeRes);
+
+            const rawFieldResults = describeRes.fields?.filter(f => !f.compoundFieldName && f.type !== 'id')?.map(f => {
+                const rResults = [];
+                const eResults = [];
+                standaloneIds.forEach(id => {
+                    const fRec = fieldMapRaw[id]?.[f.name];
+                    rResults.push({ label: sourceLabels[id], grant: f.permissionable ? !!fRec?.PermissionsRead : true, muted: false });
+                    eResults.push({ label: sourceLabels[id], grant: f.permissionable ? !!fRec?.PermissionsEdit : f.updateable, muted: false });
+                });
+                groupsConfig.forEach(config => {
+                    const groupRef = userPermissions.groups.find(g => g.MutingPSId === config.muteId || (config.psIds.includes(g.PSIds[0])));
+                    const label = groupRef ? `PSG: ${groupRef.Label}` : 'PSG';
+                    rResults.push({ label, ...getEffectiveForGroup(config, 'Read', true, name) });
+                    eResults.push({ label, ...getEffectiveForGroup(config, 'Edit', true, name) });
+                });
+                return { name: f.name, label: f.label, rResults, eResults };
             });
 
             setObjectPermsCache(prev => ({
                 ...prev,
                 [object.name]: {
-                    object: aggregatedObj,
-                    fields: Object.entries(fieldMap).map(([name, perms]) => ({ name, ...perms }))
+                    rawObjectResults,
+                    rawFieldResults,
+                    sourceBreakdown
                 }
             }));
             setLastEvaluatedSources([...selectedSources]);
             setNeedsReEvaluation(false);
         } catch (err) {
             message.error('Error fetching object permissions.');
+            console.log('err : ', err.stack);
+
         } finally {
             setFetchingDetail(false);
         }
@@ -229,12 +335,7 @@ function App() {
         if (expandedObject) {
             const obj = objects.find(o => o.name === expandedObject);
             if (obj) {
-                setObjectPermsCache(prev => {
-                    const newCache = { ...prev };
-                    delete newCache[expandedObject];
-                    return newCache;
-                });
-                fetchObjectPermissions(obj);
+                fetchObjectPermissions(obj, true);
             }
         }
     };
@@ -266,7 +367,7 @@ function App() {
             <header className="app-header d-f a-i-c j-c-s-b p-i-1l p-bk-l">
                 <div className="d-f a-i-c g-m">
                     <SafetyCertificateOutlined className="fs-24-px c-prim" />
-                    <h1 className="fs-18-px c-w m-a-0 fw-600">Salesforce Permission Manager</h1>
+                    <h1 className="fs-18-px c-w m-a-0 fw-600">Salesforce Permission Assistance</h1>
                 </div>
                 <div className="d-f a-i-c g-1">
                     {orgInfo && <div className="bg-c-prim-xl p-bk-xs p-i-s b-rad-4-px fs-12-px c-prim fw-600">{orgInfo.Name}</div>}
@@ -317,7 +418,7 @@ function App() {
                                         <div className="fs-13-px fw-700 c-b-2 p-b-xs">{selectedUser?.Name}</div>
                                         <span className="fs-11-px c-b-2 t-o-e">{selectedUser.Username}</span>
                                     </div>
-                                    <div className="d-f j-c-s-b">
+                                    <div className="d-f j-c-s-b f-w-w g-m">
                                         <Tag color="blue" className="fs-13-px m-a-0">
                                             {selectedUser?.UserRole?.Name || 'N/A'}
                                         </Tag>
@@ -340,20 +441,28 @@ function App() {
                             </div>
                             {!noPermissions ? (
                                 <div className="p-a-m bg-c-wb-1 b-rad-4-px b-1-px b-c-b-5">
-                                    <div className="fs-13-px fw-700 c-b-3 p-a-m border-b p-t-0">PROFILE</div>
                                     {userPermissions.profile?.Id && (
-                                        <div
-                                            className={`source-toggle d-f a-i-c j-c-s-b p-a-s m-t-xs b-rad-4-px cur-pointer tran-a-l-2 ${selectedSources.includes(userPermissions.profile?.PermissionSet?.Id) ? 'active' : ''}`}
-                                            onClick={() => toggleSource(userPermissions.profile?.PermissionSet?.Id)}
-                                        >
-                                            <span className="fs-13-px c-b-1">{userPermissions.profile?.Name}</span>
-                                            <Tag color="gold" className="fs-10-px m-a-0">PRO</Tag>
-                                        </div>
+                                        <>
+                                            <div className="fs-14-px fw-700 p-a-m border-b p-t-0 d-f a-i-c g-m">
+                                                <SolutionOutlined />
+                                                PROFILE
+                                            </div>
+                                            <div
+                                                className={`source-toggle d-f a-i-c j-c-s-b p-a-s m-t-xs b-rad-4-px cur-pointer tran-a-l-2 ${selectedSources.includes(userPermissions.profile?.PermissionSet?.Id) ? 'active' : ''}`}
+                                                onClick={() => toggleSource(userPermissions.profile?.PermissionSet?.Id)}
+                                            >
+                                                <span className="fs-13-px c-b-1">{userPermissions.profile?.Name}</span>
+                                                <Tag color="gold" className="fs-10-px m-a-0">PRO</Tag>
+                                            </div>
+                                        </>
                                     )}
 
                                     {userPermissions.assignments.length > 0 && (
                                         <>
-                                            <div className="fs-13-px fw-700 c-b-3 m-t-m p-a-m border-b">PERMISSION SETS</div>
+                                            <div className="fs-14-px fw-700 m-t-m p-a-m border-b d-f a-i-c g-m">
+                                                <ScheduleOutlined />
+                                                PERMISSION SETS
+                                            </div>
                                             {userPermissions.assignments.map(a => (
                                                 <div
                                                     key={a.PermissionSet.Id}
@@ -369,14 +478,22 @@ function App() {
 
                                     {userPermissions.groups.length > 0 && (
                                         <>
-                                            <div className="fs-13-px fw-700 c-b-3 m-t-m p-b-xs border-b">PERMISSION SET GROUPS</div>
+                                            <div className="fs-14-px fw-700 m-t-m p-b-xs border-b d-f a-i-c g-m">
+                                                <ClusterOutlined />
+                                                PERMISSION SET GROUPS
+                                            </div>
                                             {userPermissions.groups.map(g => (
                                                 <div
                                                     key={g.Id}
                                                     className={`source-toggle d-f a-i-c j-c-s-b p-a-s m-t-xs b-rad-4-px cur-pointer tran-a-l-2 ${selectedSources.includes(g.Id) ? 'active' : ''}`}
                                                     onClick={() => toggleSource(g.Id)}
                                                 >
-                                                    <span className="fs-13-px c-b-1 t-o-e">{g.Label}</span>
+                                                    <div className="d-f a-i-c g-s of-h">
+                                                        <span className="fs-13-px c-b-1 t-o-e">{g.Label}</span>
+                                                        {g.MutingPSId && (
+                                                            <Tag color="volcano" className="fs-9-px m-a-0" style={{ padding: '0 4px', lineHeight: '14px' }}>MUTING</Tag>
+                                                        )}
+                                                    </div>
                                                     <Tag color="purple" className="fs-10-px m-a-0">PSG</Tag>
                                                 </div>
                                             ))}
@@ -436,6 +553,63 @@ function App() {
                                                 ) : (
                                                     <div className="animate-in">
 
+                                                        <div className="d-f a-i-s j-c-s-b p-b-m border-b m-b-m">
+                                                            <div className="d-f f-w g-m f-g-1">
+                                                                {['Read', 'Create', 'Edit', 'Delete', '', 'ViewAllRecords', 'ModifyAllRecords', 'ViewAllFields'].map(p => {
+
+                                                                    if (!p) return <div className='w-100-p'></div>
+
+                                                                    const cached = objectPermsCache[obj.name];
+                                                                    if (!cached) return null;
+
+                                                                    const results = cached.rawObjectResults[p] || [];
+                                                                    const isGranted = isMutualMode ? (results.length > 0 && results.every(r => r.grant)) : results.some(r => r.grant);
+                                                                    const grantSources = results.filter(r => r.grant || r.muted);
+
+                                                                    if (isMutualMode && !isGranted) return null; // Hide non-mutual
+
+                                                                    let statusClass = 'inactive';
+                                                                    if (isGranted) statusClass = p.includes('All') ? 'active-blue' : 'active-green';
+
+                                                                    const badge = (
+                                                                        <div key={p} className={`perm-badge p-bk-xs p-i-m b-rad-20-px fs-11-px fw-600 ${statusClass} cur-help d-f a-i-c j-c-c g-xs`}>
+                                                                            {p.replace('AllRecords', ' All Records')?.replace('AllFields', ' All Fields')}
+                                                                        </div>
+                                                                    );
+
+                                                                    const popoverContent = (
+                                                                        <div className="fs-11-px" style={{ minWidth: 200 }}>
+                                                                            {grantSources.map(r => (
+                                                                                <div key={r.label} className="d-f g-m j-c-s-b p-bk-xs border-b-ghost">
+                                                                                    <span>{r.label}</span>
+                                                                                    <Tag color={r.grant ? 'green' : 'orange'} className="fs-9-px m-a-0">{r.grant ? 'GRANT' : 'MUTED'}</Tag>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    );
+
+                                                                    return (
+                                                                        <Popover
+                                                                            key={p}
+                                                                            title={<span className="fs-12-px fw-700">Source Analysis: {p.replace('All', ' All')}</span>}
+                                                                            content={popoverContent}
+                                                                        >
+                                                                            {badge}
+                                                                        </Popover>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                            <div className="d-f a-i-c g-s">
+                                                                <span className="fs-12-px fw-600 c-b-3">MUTUAL</span>
+                                                                <Switch
+                                                                    size="medium"
+                                                                    checked={isMutualMode}
+                                                                    onChange={setIsMutualMode}
+                                                                    disabled={selectedSources?.length == 1}
+                                                                />
+                                                            </div>
+                                                        </div>
+
                                                         {needsReEvaluation && (
                                                             <div className="p-a-m m-b-m bg-c-prim-xxl b-rad-4-px d-f a-i-c j-c-s-b animate-in">
                                                                 <span className="fs-12-px c-prim fw-600">Filters changed. Update to see new permissions.</span>
@@ -445,15 +619,6 @@ function App() {
                                                                 </button>
                                                             </div>
                                                         )}
-
-                                                        <div className="d-f f-w g-m p-b-m">
-                                                            {['Read', 'Create', 'Edit', 'Delete', 'ViewAll', 'ModifyAll'].map(p => (
-                                                                <div key={p} className={`perm-badge p-bk-xs p-i-m b-rad-20-px fs-11-px fw-600 ${objectPermsCache[obj.name]?.object[p] ? (p.includes('All') ? 'active-blue' : 'active-green') : 'inactive'}`}>
-                                                                    {p.replace('All', ' All')}
-                                                                </div>
-                                                            ))}
-                                                        </div>
-
 
                                                         <Divider className="m-bk-m fs-13-px c-b-3">FIELD LEVEL SECURITY</Divider>
                                                         <Search
@@ -468,12 +633,90 @@ function App() {
                                                                 loading={fetchingDetail}
                                                                 size="small"
                                                                 pagination={false}
-                                                                dataSource={objectPermsCache[obj.name]?.fields.filter(f => f.name.toLowerCase().includes(fieldSearch.toLowerCase()))}
+                                                                dataSource={objectPermsCache[obj.name]?.rawFieldResults.map(f => {
+                                                                    const rGrant = isMutualMode ? (f.rResults.length > 0 && f.rResults.every(r => r.grant || r.muted)) : f.rResults.some(r => r.grant || r.muted);
+                                                                    const eGrant = isMutualMode ? (f.eResults.length > 0 && f.eResults.every(e => e.grant || e.muted)) : f.eResults.some(e => e.grant || e.muted);
+                                                                    return {
+                                                                        ...f,
+                                                                        Read: rGrant,
+                                                                        Edit: eGrant,
+                                                                        IsMutedRead: f.rResults.some(r => r.muted),
+                                                                        IsMutedEdit: f.eResults.some(e => e.muted),
+                                                                        rSources: f.rResults.filter(r => r.grant || r.muted),
+                                                                        eSources: f.eResults.filter(e => e.grant || e.muted)
+                                                                    };
+                                                                }).filter(f => {
+                                                                    return f.name.toLowerCase().includes(fieldSearch.toLowerCase());
+                                                                })}
                                                                 rowKey="name"
                                                                 columns={[
-                                                                    { title: 'Field Name', dataIndex: 'name', key: 'name', sorter: (a, b) => a.name.localeCompare(b.name) },
-                                                                    { title: 'Read', dataIndex: 'Read', key: 'Read', align: 'center', render: v => <Tag color={v ? 'green' : 'red'} className="fs-10-px b-rad-2-px">{v ? 'GRANT' : 'DENY'}</Tag> },
-                                                                    { title: 'Edit', dataIndex: 'Edit', key: 'Edit', align: 'center', render: v => <Tag color={v ? 'green' : 'red'} className="fs-10-px b-rad-2-px">{v ? 'GRANT' : 'DENY'}</Tag> },
+                                                                    {
+                                                                        title: 'Field Name', dataIndex: 'name', key: 'name', sorter: (a, b) => a.label.localeCompare(b.label),
+                                                                        render: (v, record) => {
+                                                                            return (
+                                                                                <div className='text-ellipsis' title={record.name}>
+                                                                                    <span className="text-ellipsis">{record.label} ({record.name})</span>
+                                                                                </div>
+                                                                            );
+                                                                        }
+                                                                    },
+                                                                    {
+                                                                        title: 'Read', dataIndex: 'Read', key: 'Read', align: 'center',
+                                                                        render: (v, record) => {
+                                                                            if (isMutualMode && !v) return '-';
+                                                                            const badge = (
+                                                                                <Tag color={v ? 'green' : (record.IsMutedRead ? 'orange' : 'red')} className="fs-10-px b-rad-2-px cur-help">
+                                                                                    {v ? 'GRANT' : (record.IsMutedRead ? 'MUTED' : 'DENY')}
+                                                                                </Tag>
+                                                                            );
+                                                                            return record.rSources?.length > 0 ? (
+                                                                                <Popover
+                                                                                    content={
+                                                                                        <div className="fs-11-px">{
+                                                                                            record.rSources.map(s =>
+                                                                                                <div className='d-f a-i-c j-c-s-b g-m m-b-s' key={s.label}>
+                                                                                                    {s.label}
+                                                                                                    <Tag color={s.muted ? 'orange' : 'green'} className="fs-10-px b-rad-2-px cur-help">
+                                                                                                        {s.muted ? 'MUTED' : 'Granted'}
+                                                                                                    </Tag>
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    }
+                                                                                    title="Read Sources">
+                                                                                    {badge}
+                                                                                </Popover>
+                                                                            ) : badge;
+                                                                        }
+                                                                    },
+                                                                    {
+                                                                        title: 'Edit', dataIndex: 'Edit', key: 'Edit', align: 'center',
+                                                                        render: (v, record) => {
+                                                                            if (isMutualMode && !v) return '-';
+                                                                            const badge = (
+                                                                                <Tag color={v ? 'green' : (record.IsMutedEdit ? 'orange' : 'red')} className="fs-10-px b-rad-2-px cur-help">
+                                                                                    {v ? 'GRANT' : (record.IsMutedEdit ? 'MUTED' : 'DENY')}
+                                                                                </Tag>
+                                                                            );
+                                                                            return record.eSources?.length > 0 ? (
+                                                                                <Popover content={
+                                                                                    <div className="fs-11-px">
+                                                                                        {record.eSources.map(s =>
+                                                                                            <div className='d-f a-i-c j-c-s-b g-m m-b-s' key={s.label}>
+                                                                                                {s.label}
+                                                                                                <Tag color={s.muted ? 'orange' : 'green'} className='fs-10-px b-rad-2-px cur-help'>
+                                                                                                    {s.muted ? 'MUTED' : 'GRANT'}
+                                                                                                </Tag>
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>}
+                                                                                    title="Edit Sources"
+                                                                                >
+                                                                                    {badge}
+                                                                                </Popover>
+                                                                            ) : badge;
+                                                                        }
+                                                                    },
                                                                 ]}
                                                             />
                                                         </div>
