@@ -14,6 +14,7 @@
 
 .app-header {
   height: 60px;
+  max-height: 60px;
   background: linear-gradient(90deg, #0d1b2a 0%, #1b263b 100%);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
@@ -204,4 +205,106 @@
 
 .cur-help {
   cursor: help;
+}
+
+:root {
+  --c-prim: #00a1e0;
+  --c-prim-l: #33b4e6;
+  --c-prim-xl: #e6f6fc;
+  --c-prim-xxl: #f0faff;
+  --c-cyan: #0891b2;
+  --c-cyan-xl: #ecfeff;
+  --b-c-b-5: #edf2f7;
+  --bg-c-wb-1: #f8fafc;
+}
+
+.bg-c-prim-xl {
+  background-color: var(--c-prim-xl) !important;
+}
+
+.bg-c-prim-xxl {
+  background-color: var(--c-prim-xxl) !important;
+}
+
+.bg-c-cyan-xl {
+  background-color: var(--c-cyan-xl) !important;
+}
+
+.bg-c-wb-1 {
+  background-color: var(--bg-c-wb-1) !important;
+}
+
+.c-prim {
+  color: var(--c-prim) !important;
+}
+
+.c-cyan {
+  color: var(--c-cyan) !important;
+}
+
+.shadow-l {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04) !important;
+}
+
+.dashed {
+  border-style: dashed !important;
+}
+
+.b-rad-50-p {
+  border-radius: 50% !important;
+}
+
+.zoom-in {
+  animation: zoomIn 0.3s ease-out;
+}
+
+@keyframes zoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.slide-in-right {
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.02);
+    opacity: 0.9;
+  }
+}
+
+.ant-tabs-content,
+.ant-tabs-tabpane {
+  height: 100%;
 }
