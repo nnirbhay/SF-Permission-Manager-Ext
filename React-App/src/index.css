@@ -15,6 +15,7 @@
 
 #root {
   width: 100%;
+  height: max-content;
 }
 
 a {

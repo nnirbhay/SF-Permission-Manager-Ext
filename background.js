@@ -1,4 +1,3 @@
-
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.message === "get_sid") {
         chrome.cookies.get({ url: request.sfHost, name: "sid", storeId: sender.tab.cookieStoreId }, sessionCookie => {
@@ -8,7 +7,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
             sendResponse(sessionCookie.value);
         });
-        return true; // Tell Chrome that we want to call sendResponse asynchronously.
+        return true;
+    }
+
+    if (request.action === "OPEN_RECORD_ACCESS_ANALYZER") {
+        // Forward message to the content script in the specific tab
+        chrome.tabs.sendMessage(request.tabId, { action: "OPEN_RECORD_ACCESS_ANALYZER" });
+        return true;
     }
 });
 

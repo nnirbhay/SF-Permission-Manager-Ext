@@ -2,8 +2,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Select, Spin, Tag, message, Input, Popover, Avatar, Divider, Table, Switch, Tabs, Radio, Segmented } from 'antd';
 import { UserOutlined, SafetyCertificateOutlined, CloudServerOutlined, CopyOutlined, CloudOutlined, FilterOutlined, DownOutlined, UpOutlined, ReloadOutlined, ExclamationCircleOutlined, SolutionOutlined, ScheduleOutlined, ClusterOutlined, RocketOutlined, SearchOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
-import '../../src/utilities/prototypes/prototypes.js';
-import './App.css';
+import '../../../src/utilities/prototypes/prototypes.js';
+import '../App.css';
 
 const { Search } = Input;
 const API_VERSION = '65.0';
@@ -11,7 +11,7 @@ const API_VERSION = '65.0';
 let orgDomain;
 let sessionId;
 
-function App() {
+export default function PermissionAnalyzer() {
     const [loading, setLoading] = useState(true);
     const [errorCode, setErrorCode] = useState(null);
     const [users, setUsers] = useState([]);
@@ -1664,7 +1664,9 @@ function App() {
     );
 }
 
-export default App;
+
+// End of PermissionAnalyzer component
+
 
 
 const errorCodeMessages = () => {

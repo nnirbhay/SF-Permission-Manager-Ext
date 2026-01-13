@@ -18,5 +18,20 @@
     "https://*.salesforce.com/*",
     "https://*.builder.salesforce-experience.com/*",
     "https://*.salesforce-setup.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.force.com/*",
+        "https://*.salesforce.com/*",
+        "https://*.salesforce-setup.com/*"
+      ],
+      "js": [
+        "React-App/dist/content.js"
+      ],
+      "css": [
+        "React-App/dist/content.css"
+      ]
+    }
   ]
 }
