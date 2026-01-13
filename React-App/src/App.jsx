@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { Select, Spin, Tag, message, Input, Popover, Avatar, Divider, Table, Switch, Tabs, Radio, Segmented } from 'antd';
-import { UserOutlined, SafetyCertificateOutlined, CloudServerOutlined, CopyOutlined, CloudOutlined, FilterOutlined, DownOutlined, UpOutlined, ReloadOutlined, ExclamationCircleOutlined, SolutionOutlined, ScheduleOutlined, ClusterOutlined, RocketOutlined, SearchOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { UserOutlined, SafetyCertificateOutlined, CloudServerOutlined, CopyOutlined, CloudOutlined, FilterOutlined, DownOutlined, UpOutlined, ReloadOutlined, ExclamationCircleOutlined, SolutionOutlined, ScheduleOutlined, ClusterOutlined, RocketOutlined, SearchOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import '../../src/utilities/prototypes/prototypes.js';
 import './App.css';
 
@@ -13,19 +13,20 @@ let sessionId;
 
 function App() {
     const [loading, setLoading] = useState(true);
+    const [errorCode, setErrorCode] = useState(null);
     const [users, setUsers] = useState([]);
     const [systemPermissions, setSystemPermissions] = useState([]);
     const [selectedUser, setSelectedUser] = useState(null);
     const [orgInfo, setOrgInfo] = useState(null);
     const [objects, setObjects] = useState([]);
     const [userPermissions, setUserPermissions] = useState({ profile: null, assignments: [], groups: [] });
+    const [userSystemPermissions, setUserSystemPermissions] = useState({});
     const [selectedSources, setSelectedSources] = useState([]);
     const [expandedObject, setExpandedObject] = useState(null);
     const [objectPermsCache, setObjectPermsCache] = useState({});
     const [fetchingDetail, setFetchingDetail] = useState(false);
     const [objSearch, setObjSearch] = useState('');
     const [fieldSearch, setFieldSearch] = useState('');
-    const [noPermissions, setNoPermissions] = useState(false);
     const [isMutualMode, setIsMutualMode] = useState(false);
     const [setupEntityCache, setSetupEntityCache] = useState({});
     const [fetchingSetupEntities, setFetchingSetupEntities] = useState(false);
@@ -46,7 +47,6 @@ function App() {
     const [fetchingFields, setFetchingFields] = useState(false);
     const [objPermsLogic, setObjPermsLogic] = useState('AND');
     const [fieldPermsLogic, setFieldPermsLogic] = useState('AND');
-    const [objectPermsMap, setObjectPermsMap] = useState({}); // { ParentId: { Read: true, ... } }
     const [dataFetched, setDataFetched] = useState(false);
 
     const trackApiCall = (type) => {
@@ -66,44 +66,6 @@ function App() {
     const filteredSystemUsers = useMemo(() => {
         if (analyzeMode !== 'system' && analyzeMode !== 'object') return systemPermUsers;
         if (selectedSources.length === 0) return systemPermUsers;
-
-        if (analyzeMode === 'object' && false) {
-            if (selectedPermsForAnalysis.length === 0) return [];
-
-            // Group assignments by user
-            const userAssignments = {};
-            systemPermUsersAssignments.forEach(a => {
-                if (!userAssignments[a.AssigneeId]) userAssignments[a.AssigneeId] = [];
-                userAssignments[a.AssigneeId].push(a);
-            });
-
-            return systemPermUsers.filter(user => {
-                const assignments = userAssignments[user.Id] || [];
-
-                // Filter by selected sources
-                const hasMatchingSource = selectedSources.length === 0 || assignments.some(a => {
-                    return selectedSources.includes(a.PermissionSet.Id) || (a.PermissionSetGroup && selectedSources.includes(a.PermissionSetGroup.Id));
-                });
-                if (!hasMatchingSource) return false;
-
-                // Combine permissions from all assignments for this user
-                const combinedPerms = {};
-                assignments.forEach(a => {
-                    const pMap = objectPermsMap[a.PermissionSet.Id];
-                    if (pMap) {
-                        Object.keys(pMap).forEach(k => {
-                            if (pMap[k]) combinedPerms[k] = true;
-                        });
-                    }
-                });
-
-                if (permsLogic === 'OR') {
-                    return selectedPermsForAnalysis.some(p => combinedPerms[p]);
-                } else {
-                    return selectedPermsForAnalysis.every(p => combinedPerms[p]);
-                }
-            });
-        }
 
         // Default System mode logic
         const matchingAssigneeIds = new Set();
@@ -135,6 +97,7 @@ function App() {
                 sessionId = await chrome.runtime.sendMessage({ message: "get_sid", sfHost: orgDomain });
                 if (!sessionId) {
                     message.error('Session expired or not found. Please refresh the Salesforce tab.');
+                    setErrorCode('INVALID_SESSION_ID')
                     setLoading(false);
                     return;
                 }
@@ -150,6 +113,10 @@ function App() {
     }, []);
 
     const orgCallout = async (url, method = 'GET', body = null, callType = 'generic') => {
+        if (errorCode) {
+            message.error(errorCodeMessages()[errorCode]);
+            return;
+        }
         trackApiCall(callType);
         const response = await fetch(`${orgDomain}${url}`, {
             method,
@@ -158,7 +125,11 @@ function App() {
         });
         let result = await response.json();
         console.log('orgCallout : ', url, result);
-        if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+        if (!response.ok) {
+            console.log('error Code : ', result?.at(0)?.errorCode);
+            setErrorCode(result?.at(0)?.errorCode);
+            throw new Error(`API error: ${response.statusText}`);
+        }
         return result;
     };
 
@@ -215,9 +186,12 @@ function App() {
         const user = users.find(u => u.Id === userId);
         setSelectedUser(user);
         setUserPermissions({ profile: null, assignments: [], groups: [] });
+        setUserSystemPermissions({});
         setSelectedSources([]);
         setExpandedObject(null);
         setObjectPermsCache({});
+
+        let sysPermissions = systemPermissions.map(sp => sp.name);
 
         try {
             // Composite request for User Assignments and Muting Info
@@ -229,6 +203,10 @@ function App() {
                         url: `/services/data/v${API_VERSION}/query?q=${encodeURIComponent(`SELECT PermissionSet.Id, PermissionSet.Name, PermissionSet.Label, PermissionSet.IsOwnedByProfile, PermissionSet.Profile.Id, PermissionSet.Profile.Name, PermissionSetGroup.Id, PermissionSetGroup.MasterLabel FROM PermissionSetAssignment WHERE AssigneeId = '${userId}'`)}`
                     },
                     {
+                        method: "GET", referenceId: "System_Assignments",
+                        url: `/services/data/v${API_VERSION}/query?q=${encodeURIComponent(`SELECT Id, Name, Label, IsOwnedByProfile, Profile.Name, PermissionSetGroupId, ${sysPermissions.join(',')} FROM PermissionSet WHERE ID IN (SELECT PermissionSetId FROM PermissionSetAssignment WHERE AssigneeId = '${userId}')`)}`
+                    },
+                    {
                         method: "GET", referenceId: "PSGComponents",
                         url: `/services/data/v${API_VERSION}/query?q=${encodeURIComponent(`SELECT Id, PermissionSetId, PermissionSetGroupId, PermissionSet.Name, PermissionSet.Label FROM PermissionSetGroupComponent WHERE PermissionSetGroupId IN (SELECT PermissionSetGroupId FROM PermissionSetAssignment WHERE AssigneeId = '${userId}')`)}`
                     }
@@ -237,13 +215,15 @@ function App() {
 
             const resComp = await orgCallout(`/services/data/v${API_VERSION}/composite`, 'POST', compositeRequest, 'user_permissions_fetch');
             const assignmentRes = resComp.compositeResponse.find(r => r.referenceId === 'Assignments').body;
+            const sysPermissionAssignemnts = resComp.compositeResponse.find(r => r.referenceId === 'System_Assignments').body;
             const PSGComponentsRes = resComp.compositeResponse.find(r => r.referenceId === 'PSGComponents').body;
 
             const profileAssignemnt = assignmentRes?.records?.find(r => r.PermissionSet.IsOwnedByProfile) ?? {};
-            const profile = { ...profileAssignemnt.PermissionSet.Profile, PermissionSet: profileAssignemnt.PermissionSet };
+            const profile = { ...profileAssignemnt.PermissionSet?.Profile, PermissionSet: profileAssignemnt.PermissionSet };
 
-            const assignments = assignmentRes.records.filter(r => !r.PermissionSet.IsOwnedByProfile && !r.PermissionSetGroup);
+            const assignments = assignmentRes.records?.filter(r => !r.PermissionSet.IsOwnedByProfile && !r.PermissionSetGroup);
             const groupsMap = {};
+            const userSystemPermissions = {};
 
             assignmentRes.records.forEach(r => {
                 if (r.PermissionSetGroup) {
@@ -273,9 +253,20 @@ function App() {
                 }
             });
 
-            console.log('groupsMap : ', groupsMap);
-
             setUserPermissions({ profile, assignments, groups: Object.values(groupsMap) });
+
+            sysPermissionAssignemnts.records.forEach(r => {
+                userSystemPermissions[r.Id] = {
+                    isProfile: r.IsOwnedByProfile,
+                    id: r.Id, name: r.IsOwnedByProfile ? r?.Profile.Name : r.Name,
+                    label: r.IsOwnedByProfile ? r?.Profile.Name : r.Label,
+                    granted: systemPermissions?.filter(ele => r[ele.name] == true)?.map(e => (e.name)),
+                    // need to re-evalute the mutting for system permissions 
+                    // MutingPSId: PSGComponentsRes.records?.find(c => c.PermissionSetId.startsWith('0QM') && groupsMap[r.PermissionSetGroupId]),
+                }
+            });
+
+            setUserSystemPermissions(userSystemPermissions) // This will be handled by setupUserSystemPermission
         } catch (err) {
             console.error(err);
             message.error('Error fetching user permissions.');
@@ -284,6 +275,9 @@ function App() {
 
     const toggleSource = (id) => {
         setSelectedSources(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+        if (selectedSources.length < 2) {
+            setIsMutualMode(false)
+        }
     };
 
     const getTargetParentIds = () => {
@@ -401,11 +395,6 @@ function App() {
                 rawObjectResults[p] = resultsPerSource;
             });
 
-            const sourceBreakdown = {};
-            Object.keys(rawObjectResults).forEach(p => {
-                sourceBreakdown[p] = rawObjectResults[p].filter(r => r.grant).map(r => r.label);
-            });
-
             const rawFieldResults = describeRes.fields?.filter(f => !f.compoundFieldName && f.type !== 'id')?.map(f => {
                 const rResults = [];
                 const eResults = [];
@@ -428,7 +417,6 @@ function App() {
                 [object.name]: {
                     rawObjectResults,
                     rawFieldResults,
-                    sourceBreakdown
                 }
             }));
         } catch (err) {
@@ -615,6 +603,70 @@ function App() {
         }
     };
 
+    const setupUserSystemPermission = async () => {
+        try {
+            const { groupsConfig, standaloneIds } = getTargetParentIds();
+            const allPSIds = new Set(standaloneIds);
+            groupsConfig.forEach(g => {
+                g.psIds.forEach(id => allPSIds.add(id));
+                if (g.muteId) allPSIds.add(g.muteId);
+            });
+
+            if (allPSIds.size === 0) return;
+
+            const psIdsStr = Array.from(allPSIds).map(id => `'${id}'`).join(',');
+            const fieldsToQuery = systemPermissions.map(p => p.name).join(',');
+            const psQuery = `SELECT Id, ${fieldsToQuery} FROM PermissionSet WHERE Id IN (${psIdsStr})`;
+
+            const res = await orgCallout(`/services/data/v${API_VERSION}/query?q=${encodeURIComponent(psQuery)}`, 'GET', null, 'user_system_perms_fetch');
+            const psMap = {};
+            res.records.forEach(r => psMap[r.Id] = r);
+
+            // Calculate Effective
+            const sourceLabels = {};
+            if (userPermissions.profile) sourceLabels[userPermissions.profile.PermissionSet.Id] = `Profile: ${userPermissions.profile.Name}`;
+            userPermissions.assignments.forEach(a => sourceLabels[a.PermissionSet.Id] = `PS: ${a.PermissionSet.Label}`);
+            userPermissions.groups.forEach(g => sourceLabels[g.Id] = `PSG: ${g.Label}`);
+
+            const getEffectiveForSytemPerm = (config, pName) => {
+                let groupGrant = false;
+                config.psIds.forEach(id => {
+                    const rec = psMap[id];
+                    if (rec && rec[pName]) groupGrant = true;
+                });
+
+                let isMuted = false;
+                if (config.muteId) {
+                    const muteRec = psMap[config.muteId];
+                    if (muteRec && muteRec[pName]) isMuted = true;
+                }
+                return { grant: groupGrant && !isMuted, muted: isMuted };
+            };
+
+            const rawSystemResults = {};
+            systemPermissions.forEach(p => {
+                const resultsPerSource = [];
+                standaloneIds.forEach(id => {
+                    const rec = psMap[id];
+                    resultsPerSource.push({ id, label: sourceLabels[id], grant: !!rec?.[p.name], muted: false });
+                });
+                groupsConfig.forEach(config => {
+                    const groupRef = userPermissions.groups.find(g => g.MutingPSId === config.muteId || (config.psIds.includes(g.PSIds[0])));
+                    const groupResult = getEffectiveForSytemPerm(config, p.name);
+                    resultsPerSource.push({ id: groupRef?.Id, label: (groupRef?.Label ? `PSG: ${groupRef.Label}` : 'PSG'), ...groupResult });
+                });
+                rawSystemResults[p.name] = resultsPerSource;
+            });
+
+            setUserSystemPermissions(rawSystemResults);
+        } catch (err) {
+            console.error(err);
+            message.error('Error fetching user system permissions.');
+        } finally {
+            setFetchingDetail(false);
+        }
+    };
+
     const fetchSetupEntityAccess = async () => {
         if (!selectedUser) return;
         setFetchingSetupEntities(true);
@@ -675,6 +727,20 @@ function App() {
         if (key === 'setupEntity') {
             fetchSetupEntityAccess();
         }
+        // else if (key === 'systemPermission') {
+        //     setupUserSystemPermission();
+        // }
+        // else { // Reset object/field analysis states when switching away from it
+        //     setSelectedObjectForAnalysis(null);
+        //     setSelectedObjectPermsForAnalysis([]);
+        //     setSelectedFieldsForAnalysis([]);
+        //     setSelectedFieldPermsForAnalysis([]);
+        //     setNeedsReEvaluation(false);
+        //     setObjPermsLogic('OR');
+        //     setFieldPermsLogic('OR');
+        //     setDataFetched(false);
+        //     setUserSystemPermissions({});
+        // }
     };
 
 
@@ -699,10 +765,10 @@ function App() {
         return objects.filter(o => o.label.toLowerCase().includes(val) || o.name.toLowerCase().includes(val));
     }, [objSearch, objects]);
 
-    if (loading) return <div className="loading-container w-100-p h-100-vh d-f a-i-c j-c-c"><Spin size="large" tip="Loading Salesforce Data..." /></div>;
 
     return (
         <div className="main-app d-f f-d-c h-100-vh of-h c-b-1">
+            {loading && <div className="loading-container pos-f z-i-9999 w-100-p h-100-p d-f a-i-c j-c-c"><Spin size="large" tip="Loading Salesforce Data..." /></div>}
             <header className="app-header d-f a-i-c j-c-s-b p-i-1l p-bk-l">
                 <div className="d-f a-i-c g-m">
                     <SafetyCertificateOutlined className="fs-24-px c-prim" />
@@ -732,7 +798,6 @@ function App() {
                                 </div>
                             }
                         >
-                            <Tag color="blue" className="m-a-0 cur-pointer" style={{ cursor: 'help' }}>API Calls</Tag>
                         </Popover>
                     </div>}
                     <Popover
@@ -1086,401 +1151,512 @@ function App() {
                 </aside>
 
                 <section className="f-g-1 d-f f-d-c of-h p-a-1 bg-c-w p-t-0">
-                    {analyzeMode === 'user' ? (
-                        !selectedUser ? (
-                            <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c c-b-4">
-                                <UserOutlined style={{ fontSize: 80 }} />
-                                <div className="fs-18-px m-t-m">Select a user to analyze permissions</div>
-                            </div>
-                        ) : (
-                            <Tabs defaultActiveKey="obj&Fields" className='h-100-p' onChange={handleTabChange}
-                                items={[
-                                    {
-                                        key: 'obj&Fields', label: 'Object & Field Permissions',
-                                        children: <>
-                                            <div className="d-f f-d-c h-100-p">
-                                                <div className="m-b-m">
-                                                    <h2 className="fs-18-px fw-600 m-a-0 c-b-1 m-b-m">Object & Field Permissions</h2>
-                                                    <Search
-                                                        placeholder="Search objects..."
-                                                        className="w-100-p"
-                                                        allowClear
-                                                        onChange={e => setObjSearch(e.target.value)}
-                                                    />
-                                                </div>
+                    {errorCode && (
+                        <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c c-b-4">
+                            <CloseCircleOutlined style={{ fontSize: 48, color: 'var(--dist-color)' }} />
+                            <div className="fs-18-px m-t-m c-dist">{errorCodeMessages()[errorCode]}</div>
+                        </div>
+                    )}
+                    {!errorCode && (
+                        <>
+                            {analyzeMode === 'user' ? (
+                                !selectedUser ? (
+                                    <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c c-b-4">
+                                        <UserOutlined style={{ fontSize: 80 }} />
+                                        <div className="fs-18-px m-t-m">Select a user to analyze permissions</div>
+                                    </div>
+                                ) : (
+                                    <Tabs defaultActiveKey="obj&Fields" className='h-100-p' onChange={handleTabChange}
+                                        items={[
+                                            {
+                                                key: 'obj&Fields', label: 'Object & Field Permissions',
+                                                children: <>
+                                                    <div className="d-f f-d-c h-100-p">
+                                                        <div className="m-b-m">
+                                                            <h2 className="fs-18-px fw-600 m-a-0 c-b-1 m-b-m">Object & Field Permissions</h2>
+                                                            <Search
+                                                                placeholder="Search objects..."
+                                                                className="w-100-p"
+                                                                allowClear
+                                                                onChange={e => setObjSearch(e.target.value)}
+                                                            />
+                                                        </div>
 
-                                                <div className="f-g-1 of-y-a s-bar-auto p-r-s m-t-s">
-                                                    {filteredObjs.map(obj => (
-                                                        <div key={obj.name} className="accordion-item m-b-m bg-c-w b-rad-4-px b-1-px b-c-b-5 of-h tran-a-l-2 shadow-s">
-                                                            <div
-                                                                className={`accordion-header d-f a-i-c j-c-s-b p-a-m cur-pointer tran-a-l-2 ${expandedObject === obj.name ? 'bg-c-prim-xxl' : ''}`}
-                                                                onClick={() => toggleObjectExpansion(obj)}
-                                                            >
-                                                                <div className="d-f a-i-c g-m">
-                                                                    <CloudServerOutlined className={expandedObject === obj.name ? 'c-prim' : 'c-prim-m'} style={{ fontSize: 24 }} />
-                                                                    <div className="of-h">
-                                                                        <div className="fs-14-px fw-600 c-b-1 t-o-e">{obj.label}</div>
-                                                                        <div className="fs-11-px c-b-3 ff-mono t-o-e">{obj.name}</div>
-                                                                    </div>
-                                                                </div>
-                                                                {expandedObject === obj.name ? <UpOutlined className="c-prim" /> : <DownOutlined className="c-b-4" />}
-                                                            </div>
-
-                                                            {expandedObject === obj.name && (
-                                                                <div className="accordion-content p-a-m b-t-1-px b-c-b-5 bg-c-w">
-                                                                    {fetchingDetail && !objectPermsCache[obj.name] ? (
-                                                                        <div className="p-a-1 t-a-c"><Spin tip="Analyzing effective permissions..." /></div>
-                                                                    ) : (
-                                                                        <div className="animate-in">
-
-                                                                            <div className="d-f a-i-s j-c-s-b p-b-m border-b m-b-m">
-                                                                                <div className="d-f f-w g-m f-g-1">
-                                                                                    {['Read', 'Create', 'Edit', 'Delete', '', 'ViewAllRecords', 'ModifyAllRecords', 'ViewAllFields'].map(p => {
-
-                                                                                        if (!p) return <div className='w-100-p'></div>
-
-                                                                                        const cached = objectPermsCache[obj.name];
-                                                                                        if (!cached) return null;
-
-                                                                                        const results = (cached.rawObjectResults[p] || []).filter(r => selectedSources.length === 0 || selectedSources.includes(r.id));
-                                                                                        const isGranted = isMutualMode ? (results.length > 0 && results.every(r => r.grant)) : results.some(r => r.grant);
-                                                                                        const grantSources = results.filter(r => r.grant || r.muted);
-
-                                                                                        if (isMutualMode && !isGranted) return null;  // Hide non-mutual
-
-                                                                                        let statusClass = 'inactive';
-                                                                                        if (isGranted) statusClass = p.includes('All') ? 'active-blue' : 'active-green';
-
-                                                                                        const badge = (
-                                                                                            <div key={p} className={`perm-badge p-bk-xs p-i-m b-rad-20-px fs-11-px fw-600 ${statusClass} cur-help d-f a-i-c j-c-c g-xs`}>
-                                                                                                {p.replace('AllRecords', ' All Records')?.replace('AllFields', ' All Fields')}
-                                                                                            </div>
-                                                                                        );
-
-                                                                                        const popoverContent = (
-                                                                                            <div className="fs-11-px" style={{ minWidth: 200 }}>
-                                                                                                {grantSources.map(r => (
-                                                                                                    <div key={r.label} className="d-f g-m j-c-s-b p-bk-xs border-b-ghost">
-                                                                                                        <span>{r.label}</span>
-                                                                                                        <Tag color={r.grant ? 'green' : 'orange'} className="fs-9-px m-a-0">{r.grant ? 'GRANT' : 'MUTED'}</Tag>
-                                                                                                    </div>
-                                                                                                ))}
-                                                                                            </div>
-                                                                                        );
-
-                                                                                        return (
-                                                                                            <Popover
-                                                                                                key={p}
-                                                                                                title={<span className="fs-12-px fw-700">Source Analysis: {p.replace('All', ' All')}</span>}
-                                                                                                content={popoverContent}
-                                                                                            >
-                                                                                                {badge}
-                                                                                            </Popover>
-                                                                                        );
-                                                                                    })}
-                                                                                </div>
-                                                                                <div className="d-f a-i-c g-s">
-                                                                                    <span className="fs-12-px fw-600 c-b-3">MUTUAL</span>
-                                                                                    <Switch
-                                                                                        size="medium"
-                                                                                        checked={isMutualMode}
-                                                                                        onChange={setIsMutualMode}
-                                                                                        disabled={!(selectedSources?.length > 1)}
-                                                                                    />
-                                                                                </div>
+                                                        <div className="f-g-1 of-y-a s-bar-auto p-r-s m-t-s">
+                                                            {filteredObjs.map(obj => (
+                                                                <div key={obj.name} className="accordion-item m-b-m bg-c-w b-rad-4-px b-1-px b-c-b-5 of-h tran-a-l-2 shadow-s">
+                                                                    <div
+                                                                        className={`accordion-header d-f a-i-c j-c-s-b p-a-m cur-pointer tran-a-l-2 ${expandedObject === obj.name ? 'bg-c-prim-xxl' : ''}`}
+                                                                        onClick={() => toggleObjectExpansion(obj)}
+                                                                    >
+                                                                        <div className="d-f a-i-c g-m">
+                                                                            <CloudServerOutlined className={expandedObject === obj.name ? 'c-prim' : 'c-prim-m'} style={{ fontSize: 24 }} />
+                                                                            <div className="of-h">
+                                                                                <div className="fs-14-px fw-600 c-b-1 t-o-e">{obj.label}</div>
+                                                                                <div className="fs-11-px c-b-3 ff-mono t-o-e">{obj.name}</div>
                                                                             </div>
+                                                                        </div>
+                                                                        {expandedObject === obj.name ? <UpOutlined className="c-prim" /> : <DownOutlined className="c-b-4" />}
+                                                                    </div>
 
+                                                                    {expandedObject === obj.name && (
+                                                                        <div className="accordion-content p-a-m b-t-1-px b-c-b-5 bg-c-w">
+                                                                            {fetchingDetail && !objectPermsCache[obj.name] ? (
+                                                                                <div className="p-a-1 t-a-c"><Spin tip="Analyzing effective permissions..." /></div>
+                                                                            ) : (
+                                                                                <div className="animate-in">
 
+                                                                                    <div className="d-f a-i-s j-c-s-b p-b-m border-b m-b-m">
+                                                                                        <div className="d-f f-w g-m f-g-1">
+                                                                                            {['Read', 'Create', 'Edit', 'Delete', '', 'ViewAllRecords', 'ModifyAllRecords', 'ViewAllFields'].map(p => {
 
-                                                                            <Divider className="m-bk-m fs-13-px c-b-3">FIELD LEVEL SECURITY</Divider>
-                                                                            <Search
-                                                                                placeholder="Filter fields..."
-                                                                                size="medium"
-                                                                                className="m-b-m w-100-p"
-                                                                                onChange={e => setFieldSearch(e.target.value)}
-                                                                            />
+                                                                                                if (!p) return <div className='w-100-p'></div>
 
-                                                                            <div className="of-y-a s-bar-w-t" style={{ maxHeight: 400 }}>
-                                                                                <Table
-                                                                                    loading={fetchingDetail}
-                                                                                    size="small"
-                                                                                    pagination={false}
-                                                                                    dataSource={objectPermsCache[obj.name]?.rawFieldResults.map(f => {
-                                                                                        const rFilt = f.rResults.filter(r => selectedSources.length === 0 || selectedSources.includes(r.id));
-                                                                                        const eFilt = f.eResults.filter(e => selectedSources.length === 0 || selectedSources.includes(e.id));
-                                                                                        const rGrant = isMutualMode ? (rFilt.length > 0 && rFilt.every(r => r.grant || r.muted)) : rFilt.some(r => r.grant || r.muted);
-                                                                                        const eGrant = isMutualMode ? (eFilt.length > 0 && eFilt.every(e => e.grant || e.muted)) : eFilt.some(e => e.grant || e.muted);
-                                                                                        return {
-                                                                                            ...f,
-                                                                                            Read: rGrant,
-                                                                                            Edit: eGrant,
-                                                                                            IsMutedRead: rFilt.some(r => r.muted),
-                                                                                            IsMutedEdit: eFilt.some(e => e.muted),
-                                                                                            rSources: rFilt.filter(r => r.grant || r.muted),
-                                                                                            eSources: eFilt.filter(e => e.grant || e.muted)
-                                                                                        };
-                                                                                    }).filter(f => {
-                                                                                        return f.name.toLowerCase().includes(fieldSearch.toLowerCase());
-                                                                                    })}
-                                                                                    rowKey="name"
-                                                                                    columns={[
-                                                                                        {
-                                                                                            title: 'Field Name', dataIndex: 'name', key: 'name', sorter: (a, b) => a.label.localeCompare(b.label),
-                                                                                            render: (v, record) => {
-                                                                                                return (
-                                                                                                    <div className='text-ellipsis' title={record.name}>
-                                                                                                        <span className="text-ellipsis">{record.label} ({record.name})</span>
+                                                                                                const cached = objectPermsCache[obj.name];
+                                                                                                if (!cached) return null;
+
+                                                                                                const results = (cached.rawObjectResults[p] || []).filter(r => selectedSources.length === 0 || selectedSources.includes(r.id));
+                                                                                                const isGranted = isMutualMode ? (results.length > 0 && results.every(r => r.grant)) : results.some(r => r.grant);
+                                                                                                const grantSources = results.filter(r => r.grant || r.muted);
+
+                                                                                                if (isMutualMode && !isGranted) return null;  // Hide non-mutual
+
+                                                                                                let statusClass = 'inactive';
+                                                                                                if (isGranted) statusClass = p.includes('All') ? 'active-blue' : 'active-green';
+
+                                                                                                const badge = (
+                                                                                                    <div key={p} className={`perm-badge p-bk-xs p-i-m b-rad-20-px fs-11-px fw-600 ${statusClass} cur-help d-f a-i-c j-c-c g-xs`}>
+                                                                                                        {p.replace('AllRecords', ' All Records')?.replace('AllFields', ' All Fields')}
                                                                                                     </div>
                                                                                                 );
-                                                                                            }
-                                                                                        },
-                                                                                        {
-                                                                                            title: 'Read', dataIndex: 'Read', key: 'Read', align: 'center',
-                                                                                            render: (v, record) => {
-                                                                                                if (isMutualMode && !v) return '-';
-                                                                                                const badge = (
-                                                                                                    <Tag color={v ? 'green' : (record.IsMutedRead ? 'orange' : 'red')} className="fs-10-px b-rad-2-px cur-help">
-                                                                                                        {v ? 'GRANT' : (record.IsMutedRead ? 'MUTED' : 'DENY')}
-                                                                                                    </Tag>
-                                                                                                );
-                                                                                                return record.rSources?.length > 0 ? (
-                                                                                                    <Popover
-                                                                                                        content={
-                                                                                                            <div className="fs-11-px">{
-                                                                                                                record.rSources.map(s =>
-                                                                                                                    <div className='d-f a-i-c j-c-s-b g-m m-b-s' key={s.label}>
-                                                                                                                        {s.label}
-                                                                                                                        <Tag color={s.muted ? 'orange' : 'green'} className="fs-10-px b-rad-2-px cur-help">
-                                                                                                                            {s.muted ? 'MUTED' : 'Granted'}
-                                                                                                                        </Tag>
-                                                                                                                    </div>
-                                                                                                                )}
+
+                                                                                                const popoverContent = (
+                                                                                                    <div className="fs-11-px" style={{ minWidth: 200 }}>
+                                                                                                        {grantSources.map(r => (
+                                                                                                            <div key={r.label} className="d-f g-m j-c-s-b p-bk-xs border-b-ghost">
+                                                                                                                <span>{r.label}</span>
+                                                                                                                <Tag color={r.grant ? 'green' : 'orange'} className="fs-9-px m-a-0">{r.grant ? 'GRANT' : 'MUTED'}</Tag>
                                                                                                             </div>
-                                                                                                        }
-                                                                                                        title="Read Sources">
-                                                                                                        {badge}
-                                                                                                    </Popover>
-                                                                                                ) : badge;
-                                                                                            }
-                                                                                        },
-                                                                                        {
-                                                                                            title: 'Edit', dataIndex: 'Edit', key: 'Edit', align: 'center',
-                                                                                            render: (v, record) => {
-                                                                                                if (isMutualMode && !v) return '-';
-                                                                                                const badge = (
-                                                                                                    <Tag color={v ? 'green' : (record.IsMutedEdit ? 'orange' : 'red')} className="fs-10-px b-rad-2-px cur-help">
-                                                                                                        {v ? 'GRANT' : (record.IsMutedEdit ? 'MUTED' : 'DENY')}
-                                                                                                    </Tag>
+                                                                                                        ))}
+                                                                                                    </div>
                                                                                                 );
-                                                                                                return record.eSources?.length > 0 ? (
-                                                                                                    <Popover content={
-                                                                                                        <div className="fs-11-px">
-                                                                                                            {record.eSources.map(s =>
-                                                                                                                <div className='d-f a-i-c j-c-s-b g-m m-b-s' key={s.label}>
-                                                                                                                    {s.label}
-                                                                                                                    <Tag color={s.muted ? 'orange' : 'green'} className='fs-10-px b-rad-2-px cur-help'>
-                                                                                                                        {s.muted ? 'MUTED' : 'GRANT'}
-                                                                                                                    </Tag>
-                                                                                                                </div>
-                                                                                                            )}
-                                                                                                        </div>}
-                                                                                                        title="Edit Sources"
+
+                                                                                                return (
+                                                                                                    <Popover
+                                                                                                        key={p}
+                                                                                                        title={<span className="fs-12-px fw-700">Source Analysis: {p.replace('All', ' All')}</span>}
+                                                                                                        content={popoverContent}
                                                                                                     >
                                                                                                         {badge}
                                                                                                     </Popover>
-                                                                                                ) : badge;
-                                                                                            }
-                                                                                        },
-                                                                                    ]}
-                                                                                />
-                                                                            </div>
+                                                                                                );
+                                                                                            })}
+                                                                                        </div>
+                                                                                        <div className="d-f a-i-c g-s">
+                                                                                            <span className="fs-12-px fw-600 c-b-3">MUTUAL</span>
+                                                                                            <Switch
+                                                                                                size="medium"
+                                                                                                checked={isMutualMode}
+                                                                                                onChange={setIsMutualMode}
+                                                                                                disabled={!(selectedSources?.length > 1)}
+                                                                                            />
+                                                                                        </div>
+                                                                                    </div>
+
+
+
+                                                                                    <Divider className="m-bk-m fs-13-px c-b-3">FIELD LEVEL SECURITY</Divider>
+                                                                                    <Search
+                                                                                        placeholder="Filter fields..."
+                                                                                        size="medium"
+                                                                                        className="m-b-m w-100-p"
+                                                                                        onChange={e => setFieldSearch(e.target.value)}
+                                                                                    />
+
+                                                                                    <div className="of-y-a s-bar-w-t" style={{ maxHeight: 400 }}>
+                                                                                        <Table
+                                                                                            loading={fetchingDetail}
+                                                                                            size="small"
+                                                                                            pagination={false}
+                                                                                            dataSource={objectPermsCache[obj.name]?.rawFieldResults.map(f => {
+                                                                                                const rFilt = f.rResults.filter(r => selectedSources.length === 0 || selectedSources.includes(r.id));
+                                                                                                const eFilt = f.eResults.filter(e => selectedSources.length === 0 || selectedSources.includes(e.id));
+                                                                                                const rGrant = isMutualMode ? (rFilt.length > 0 && rFilt.every(r => r.grant || r.muted)) : rFilt.some(r => r.grant || r.muted);
+                                                                                                const eGrant = isMutualMode ? (eFilt.length > 0 && eFilt.every(e => e.grant || e.muted)) : eFilt.some(e => e.grant || e.muted);
+                                                                                                return {
+                                                                                                    ...f,
+                                                                                                    Read: rGrant,
+                                                                                                    Edit: eGrant,
+                                                                                                    IsMutedRead: rFilt.some(r => r.muted),
+                                                                                                    IsMutedEdit: eFilt.some(e => e.muted),
+                                                                                                    rSources: rFilt.filter(r => r.grant || r.muted),
+                                                                                                    eSources: eFilt.filter(e => e.grant || e.muted)
+                                                                                                };
+                                                                                            })
+                                                                                                .filter(f => {
+                                                                                                    return fieldSearch ? (f.name.toLowerCase().includes(fieldSearch.toLowerCase()) || f.label.toLowerCase().includes(fieldSearch.toLowerCase())) : true;
+                                                                                                })
+                                                                                                .sort((a, b) => a.label.localeCompare(b.label))}
+                                                                                            rowKey="name"
+                                                                                            columns={[
+                                                                                                {
+                                                                                                    title: 'Field Name', dataIndex: 'name', key: 'name', sorter: (a, b) => a.label.localeCompare(b.label),
+                                                                                                    render: (v, record) => {
+                                                                                                        return (
+                                                                                                            <div className='text-ellipsis' title={record.name}>
+                                                                                                                <span className="text-ellipsis">{record.label} ({record.name})</span>
+                                                                                                            </div>
+                                                                                                        );
+                                                                                                    }
+                                                                                                },
+                                                                                                {
+                                                                                                    title: 'Read', dataIndex: 'Read', key: 'Read', align: 'center',
+                                                                                                    render: (v, record) => {
+                                                                                                        if (isMutualMode && !v) return '-';
+                                                                                                        const badge = (
+                                                                                                            <Tag color={v ? 'green' : (record.IsMutedRead ? 'orange' : 'red')} className="fs-10-px b-rad-2-px cur-help">
+                                                                                                                {v ? 'GRANT' : (record.IsMutedRead ? 'MUTED' : 'DENY')}
+                                                                                                            </Tag>
+                                                                                                        );
+                                                                                                        return record.rSources?.length > 0 ? (
+                                                                                                            <Popover
+                                                                                                                content={
+                                                                                                                    <div className="fs-11-px">{
+                                                                                                                        record.rSources.map(s =>
+                                                                                                                            <div className='d-f a-i-c j-c-s-b g-m m-b-s' key={s.label}>
+                                                                                                                                {s.label}
+                                                                                                                                <Tag color={s.muted ? 'orange' : 'green'} className="fs-10-px b-rad-2-px cur-help">
+                                                                                                                                    {s.muted ? 'MUTED' : 'Granted'}
+                                                                                                                                </Tag>
+                                                                                                                            </div>
+                                                                                                                        )}
+                                                                                                                    </div>
+                                                                                                                }
+                                                                                                                title="Read Sources">
+                                                                                                                {badge}
+                                                                                                            </Popover>
+                                                                                                        ) : badge;
+                                                                                                    }
+                                                                                                },
+                                                                                                {
+                                                                                                    title: 'Edit', dataIndex: 'Edit', key: 'Edit', align: 'center',
+                                                                                                    render: (v, record) => {
+                                                                                                        if (isMutualMode && !v) return '-';
+                                                                                                        const badge = (
+                                                                                                            <Tag color={v ? 'green' : (record.IsMutedEdit ? 'orange' : 'red')} className="fs-10-px b-rad-2-px cur-help">
+                                                                                                                {v ? 'GRANT' : (record.IsMutedEdit ? 'MUTED' : 'DENY')}
+                                                                                                            </Tag>
+                                                                                                        );
+                                                                                                        return record.eSources?.length > 0 ? (
+                                                                                                            <Popover content={
+                                                                                                                <div className="fs-11-px">
+                                                                                                                    {record.eSources.map(s =>
+                                                                                                                        <div className='d-f a-i-c j-c-s-b g-m m-b-s' key={s.label}>
+                                                                                                                            {s.label}
+                                                                                                                            <Tag color={s.muted ? 'orange' : 'green'} className='fs-10-px b-rad-2-px cur-help'>
+                                                                                                                                {s.muted ? 'MUTED' : 'GRANT'}
+                                                                                                                            </Tag>
+                                                                                                                        </div>
+                                                                                                                    )}
+                                                                                                                </div>}
+                                                                                                                title="Edit Sources"
+                                                                                                            >
+                                                                                                                {badge}
+                                                                                                            </Popover>
+                                                                                                        ) : badge;
+                                                                                                    }
+                                                                                                },
+                                                                                            ]}
+                                                                                        />
+                                                                                    </div>
+                                                                                </div>
+                                                                            )}
                                                                         </div>
                                                                     )}
                                                                 </div>
-                                                            )}
+                                                            ))}
+                                                            {filteredObjs.length === 0 && <div className="t-a-c p-a-1 c-b-4">No objects found matching your search.</div>}
                                                         </div>
-                                                    ))}
-                                                    {filteredObjs.length === 0 && <div className="t-a-c p-a-1 c-b-4">No objects found matching your search.</div>}
-                                                </div>
-                                            </div>
-                                        </>
-                                    },
-                                    {
-                                        key: 'setupEntity', label: 'Setup Entity Access',
-                                        children: (
-                                            <div className="apps-tab animate-in h-100-p of-y-a s-bar-auto">
-                                                {fetchingSetupEntities ? (
-                                                    <div className="t-a-c p-a-xl"><Spin tip="Fetching setup entity access..." /></div>
-                                                ) : (
-                                                    <div className="d-f f-d-c g-m">
-                                                        {Object.keys(setupEntityCache).length === 0 ? (
-                                                            <div className="t-a-c p-a-xl c-b-4">No setup entity permissions found for the current selection.</div>
-                                                        ) : (
-                                                            Object.keys(setupEntityCache).sort().map(cat => (
-                                                                <div key={cat} className="accordion-item m-b-m bg-c-w b-rad-4-px b-1-px b-c-b-5 of-h shadow-s">
-                                                                    <div className="accordion-header d-f a-i-c j-c-s-b p-a-m bg-c-prim-xxl">
-                                                                        <div className="d-f a-i-c g-m">
-                                                                            <SafetyCertificateOutlined className="c-prim" style={{ fontSize: 20 }} />
-                                                                            <span className="fs-14-px fw-700 c-b-1">{cat}</span>
-                                                                        </div>
-                                                                        <Tag color="blue" className="fs-11-px m-a-0">{setupEntityCache[cat].count}</Tag>
-                                                                    </div>
-                                                                    <div className="accordion-content p-a-m bg-c-w b-t-1-px b-c-b-5">
-                                                                        <div className="d-f f-w-w g-s">
-                                                                            {Object.values(setupEntityCache[cat].entities).map(entity => (
-                                                                                <Popover
-                                                                                    key={entity.id}
-                                                                                    title="Access Sources"
-                                                                                    content={
-                                                                                        <div className="fs-11-px">
-                                                                                            {entity.sources.map((s, idx) => (
-                                                                                                <div key={idx} className="p-bk-xs border-b-ghost">{s}</div>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    }
-                                                                                >
-                                                                                    <Tag color="default" className="cur-help fs-11-px m-a-0 p-i-s p-bk-xs b-rad-4-px border-ghost">
-                                                                                        {entity.id}
-                                                                                    </Tag>
-                                                                                </Popover>
-                                                                            ))}
-                                                                        </div>
-                                                                    </div>
+                                                    </div>
+                                                </>
+                                            },
+                                            {
+                                                key: 'systemPermission', label: 'System Permissions',
+                                                children: <>
+                                                    <div className="d-f f-d-c h-100-p">
+                                                        <div className="m-b-m">
+                                                            <div className="d-f j-c-s-b a-i-c m-b-m">
+                                                                <h2 className="fs-18-px fw-600 m-a-0 c-b-1">System Permissions</h2>
+                                                                <div className="d-f a-i-c g-s">
+                                                                    <span className="fs-12-px fw-600 c-b-3">MUTUAL</span>
+                                                                    <Switch
+                                                                        size="medium"
+                                                                        checked={isMutualMode}
+                                                                        onChange={setIsMutualMode}
+                                                                        disabled={!(selectedSources?.length > 1)}
+                                                                    />
                                                                 </div>
-                                                            ))
+                                                            </div>
+                                                            <Search
+                                                                placeholder="Search system permissions..."
+                                                                className="w-100-p"
+                                                                allowClear
+                                                                onChange={e => setFieldSearch(e.target.value)}
+                                                            />
+                                                        </div>
+
+                                                        {Object.keys(userSystemPermissions).length === 0 ? (
+                                                            <div className="p-a-1 t-a-c"><Spin tip="Analyzing effective permissions..." /></div>
+                                                        ) : (
+                                                            <div className="f-g-1 of-y-a s-bar-auto p-r-s m-t-s">
+                                                                <Table
+                                                                    dataSource={systemPermissions
+                                                                        .sort((a, b) => a.label.localeCompare(b.label))
+                                                                        .filter(p => !fieldSearch || p.label.toLowerCase().includes(fieldSearch.toLowerCase()) || p.name.toLowerCase().includes(fieldSearch.toLowerCase()))
+                                                                        .map(p => {
+                                                                            const results = Object.values(userSystemPermissions).filter(r => selectedSources.length === 0 || selectedSources.includes(r.id));
+                                                                            const func = isMutualMode ? 'every' : 'some'
+                                                                            const isGranted = results[func](r => r.granted?.includes(p.name));
+                                                                            const grantSources = results.filter(r => r.granted?.includes(p.name));
+                                                                            const mutedSource = results.find(r => r.id === r.MutingPSId?.PermissionSetId);
+                                                                            mutedSource && console.log('mutedSource : ', mutedSource);
+                                                                            const isMuted = mutedSource?.granted?.includes(p.name);
+                                                                            return { ...p, isGranted, isMuted, grantSources };
+                                                                        })
+                                                                        .filter(p => isMutualMode ? p.isGranted : true)
+                                                                    }
+                                                                    rowKey="name"
+                                                                    pagination={false}
+                                                                    size="small"
+                                                                    columns={[
+                                                                        {
+                                                                            title: 'Permission Name',
+                                                                            key: 'label',
+                                                                            render: (r) => (
+                                                                                <div>
+                                                                                    <div className="fs-13-px fw-600 c-b-1">{r.label}</div>
+                                                                                    <div className="fs-10-px c-b-3 ff-mono">{r.name}</div>
+                                                                                </div>
+                                                                            )
+                                                                        },
+                                                                        {
+                                                                            title: 'Status',
+                                                                            key: 'status',
+                                                                            width: 120,
+                                                                            render: (r) => {
+                                                                                const badge = (
+                                                                                    <Tag color={r.isGranted ? 'green' : 'red'} className="fs-11-px fw-600 m-a-0 b-rad-20-px p-i-m">
+                                                                                        {r.isGranted ? 'GRANT' : 'DENY'}
+                                                                                    </Tag>
+                                                                                );
+
+                                                                                if (r.grantSources.length === 0) return badge;
+
+                                                                                return (
+                                                                                    <Popover
+                                                                                        title={<span className="fs-12-px fw-700">Source Analysis</span>}
+                                                                                        content={
+                                                                                            <div className="fs-11-px" style={{ minWidth: 200 }}>
+                                                                                                {r.grantSources.map(s => (
+                                                                                                    <div key={s.label} className="d-f g-m j-c-s-b p-bk-xs border-b-ghost">
+                                                                                                        <span>{s.label}</span>
+                                                                                                        {/* <Tag color={s.isGranted ? 'green' : 'orange'} className="fs-9-px m-a-0">{s.isGranted ? 'GRANT' : 'MUTED'}</Tag> */}
+                                                                                                        <Tag color={'green'} className="fs-9-px m-a-0">{'GRANT'}</Tag>
+                                                                                                    </div>
+                                                                                                ))}
+                                                                                            </div>
+                                                                                        }
+                                                                                    >
+                                                                                        <div className="cur-help d-i-b">{badge}</div>
+                                                                                    </Popover>
+                                                                                );
+                                                                            }
+                                                                        }
+                                                                    ]}
+                                                                />
+                                                            </div>
                                                         )}
                                                     </div>
-                                                )}
-                                            </div>
-                                        )
-                                    }
-                                ]}
-                            />
-                        )
-                    ) : (
-                        analyzeMode === 'system' ? (
-                            !selectedSystemPerm ? (
-                                <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c c-b-4">
-                                    <SafetyCertificateOutlined style={{ fontSize: 80 }} />
-                                    <div className="fs-18-px m-t-m">Select a system permission to analyze</div>
-                                </div>
-                            ) : (
-                                <div className="h-100-p d-f f-d-c animate-in p-t-m">
-                                    <div className="d-f a-i-c j-c-s-b m-b-m">
-                                        <h2 className="fs-18-px fw-600 m-a-0 c-b-1">Granted Users ({filteredSystemUsers.length})</h2>
-                                        <Tag color="blue" className="fs-12-px">{systemPermissions.find(p => p.name === selectedSystemPerm)?.label}</Tag>
-                                    </div>
-                                    <div className="f-g-1 of-y-a s-bar-auto p-r-s">
-                                        <Table
-                                            loading={fetchingSystemUsers}
-                                            dataSource={filteredSystemUsers}
-                                            rowKey="Id"
-                                            pagination={false}
-                                            columns={[
-                                                { title: 'Name', dataIndex: 'Name', key: 'Name', sorter: (a, b) => a.Name.localeCompare(b.Name) },
-                                                { title: 'Username', dataIndex: 'Username', key: 'Username', sorter: (a, b) => a.Username.localeCompare(b.Username) },
-                                                { title: 'Profile', dataIndex: 'ProfileName', key: 'ProfileName', sorter: (a, b) => a.ProfileName.localeCompare(b.ProfileName) },
-                                                { title: 'Role', dataIndex: 'RoleName', key: 'RoleName', sorter: (a, b) => (a.RoleName || '').localeCompare(b.RoleName || '') }
-                                            ]}
-                                        />
-                                    </div>
-                                </div>
-                            )
-                        ) : (
-                            !selectedObjectForAnalysis || (selectedObjectPermsForAnalysis.length === 0 && selectedFieldsForAnalysis.length === 0) ? (
-                                <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c c-b-4">
-                                    <CloudServerOutlined style={{ fontSize: 80 }} />
-                                    <div className="fs-18-px m-t-m">Select an object and criteria to analyze</div>
-                                </div>
-                            ) : !dataFetched ? (
-                                <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c">
-                                    <div className="p-a-xl b-rad-16-px d-f f-d-c a-i-c g-l animate-in zoom-in p-a-m">
-                                        <div className="p-a-m bg-c-prim-xxl b-rad-50-p">
-                                            <RocketOutlined style={{ fontSize: 60, color: 'var(--c-prim)' }} />
-                                        </div>
-                                        <div className="t-a-c">
-                                            <h3 className="fs-24-px fw-700 c-b-1 m-b-s">Ready to Analyze?</h3>
-                                            <p className="fs-14-px c-b-3 m-b-xl">
-                                                Analyze access for <strong>{`${objects.find(o => o.name === selectedObjectForAnalysis)?.label} (${selectedObjectForAnalysis})`}</strong> based on your selected criteria.
-                                            </p>
-                                        </div>
-                                        <button
-                                            className="prime-button animate-pulse p-i-xl fs-14-px fw-700"
-                                            style={{ height: 32, borderRadius: 16 }}
-                                            disabled={fetchingSystemUsers}
-                                            onClick={() => fetchObjectAccessData(selectedObjectForAnalysis, selectedObjectPermsForAnalysis, selectedFieldsForAnalysis, selectedFieldPermsForAnalysis)}
-                                        >
-                                            {fetchingSystemUsers ? <Spin size="large" /> : <><SearchOutlined /> START ANALYSIS</>}
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="h-100-p d-f f-d-c animate-in p-t-m">
-                                    <div className="m-b-m p-b-m b-b-1-px b-c-b-5">
-                                        <div className="d-f a-i-f j-c-s-b m-b-m">
-                                            <div className="d-f f-d-c">
-                                                <div className="fs-12-px c-b-3 fw-600 t-t-ucp">Analysis Scope for</div>
-                                                <h2 className="fs-24-px fw-800 m-a-0 c-prim d-f a-i-c g-s">
-                                                    {objects.find(ele => ele.name === selectedObjectForAnalysis)?.label}
-                                                    <span className="fs-14-px fw-600 c-b-3 m-l-s">({filteredSystemUsers.length} Users found)</span>
-                                                </h2>
-                                                {selectedObjectPermsForAnalysis.length > 0 && <div className="d-f f-w-w g-s m-t-xs">
-                                                    {selectedObjectPermsForAnalysis.map(p => (
-                                                        <Tag key={p} color="blue" className="fs-11-px m-a-0 border-none bg-c-prim-xl c-prim fw-600">{p}</Tag>
-                                                    ))}
-                                                    <Tag color="default" className="fs-10-px m-a-0 fw-700 m-l-a">{objPermsLogic == 'OR' ? 'ANY' : 'ALL'}</Tag>
-                                                </div>}
-                                            </div>
-                                        </div>
-
-                                        {selectedFieldsForAnalysis.length > 0 && (
-                                            <div className="m-t-s p-a-s bg-c-wb-1 b-rad-6-px b-1-px b-c-b-5 dashed w-100-p animate-in fade-in">
-                                                <div className="d-f a-i-c g-s m-b-s">
-                                                    <div className="fs-11-px fw-700 c-b-3 t-t-ucp m-r-s">Fields ({selectedFieldsForAnalysis.length}):</div>
-                                                    <div className="d-f f-w-w g-s">
-                                                        <div className="fs-12-px c-b-3 t-o-e" style={{ maxWidth: 400 }}>
-                                                            {selectedFieldsForAnalysis.join(', ')}
-                                                        </div>
+                                                </>
+                                            },
+                                            {
+                                                key: 'setupEntity', label: 'Setup Entity Access',
+                                                children: (
+                                                    <div className="apps-tab animate-in h-100-p of-y-a s-bar-auto">
+                                                        {fetchingSetupEntities ? (
+                                                            <div className="t-a-c p-a-xl"><Spin tip="Fetching setup entity access..." /></div>
+                                                        ) : (
+                                                            <div className="d-f f-d-c g-m">
+                                                                {Object.keys(setupEntityCache).length === 0 ? (
+                                                                    <div className="t-a-c p-a-xl c-b-4">No setup entity permissions found for the current selection.</div>
+                                                                ) : (
+                                                                    Object.keys(setupEntityCache).sort().map(cat => (
+                                                                        <div key={cat} className="accordion-item m-b-m bg-c-w b-rad-4-px b-1-px b-c-b-5 of-h shadow-s">
+                                                                            <div className="accordion-header d-f a-i-c j-c-s-b p-a-m bg-c-prim-xxl">
+                                                                                <div className="d-f a-i-c g-m">
+                                                                                    <SafetyCertificateOutlined className="c-prim" style={{ fontSize: 20 }} />
+                                                                                    <span className="fs-14-px fw-700 c-b-1">{cat}</span>
+                                                                                </div>
+                                                                                <Tag color="blue" className="fs-11-px m-a-0">{setupEntityCache[cat].count}</Tag>
+                                                                            </div>
+                                                                            <div className="accordion-content p-a-m bg-c-w b-t-1-px b-c-b-5">
+                                                                                <div className="d-f f-w-w g-s">
+                                                                                    {Object.values(setupEntityCache[cat].entities).map(entity => (
+                                                                                        <Popover
+                                                                                            key={entity.id}
+                                                                                            title="Access Sources"
+                                                                                            content={
+                                                                                                <div className="fs-11-px">
+                                                                                                    {entity.sources.map((s, idx) => (
+                                                                                                        <div key={idx} className="p-bk-xs border-b-ghost">{s}</div>
+                                                                                                    ))}
+                                                                                                </div>
+                                                                                            }
+                                                                                        >
+                                                                                            <Tag color="default" className="cur-help fs-11-px m-a-0 p-i-s p-bk-xs b-rad-4-px border-ghost">
+                                                                                                {entity.id}
+                                                                                            </Tag>
+                                                                                        </Popover>
+                                                                                    ))}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    ))
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                </div>
-                                                <div className="d-f a-i-c g-s">
-                                                    <Tag color="grey" className="fs-11-px m-a-0 border-none bg-c-cyan-xl c-cyan p-i-m fw-600">
-                                                        <CheckCircleOutlined /> Field Permissions: {selectedFieldPermsForAnalysis.join(` ${fieldPermsLogic} `) || 'N/A'}
-                                                    </Tag>
-                                                </div>
+                                                )
+                                            }
+                                        ]}
+                                    />
+                                )
+                            ) : (
+                                analyzeMode === 'system' ? (
+                                    !selectedSystemPerm ? (
+                                        <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c c-b-4">
+                                            <SafetyCertificateOutlined style={{ fontSize: 80 }} />
+                                            <div className="fs-18-px m-t-m">Select a system permission to analyze</div>
+                                        </div>
+                                    ) : (
+                                        <div className="h-100-p d-f f-d-c animate-in p-t-m">
+                                            <div className="d-f a-i-c j-c-s-b m-b-m">
+                                                <h2 className="fs-18-px fw-600 m-a-0 c-b-1">Granted Users ({filteredSystemUsers.length})</h2>
+                                                <Tag color="blue" className="fs-12-px">{systemPermissions.find(p => p.name === selectedSystemPerm)?.label}</Tag>
                                             </div>
-                                        )}
-
-                                        {needsReEvaluation && (
-                                            <div className="min-w-100-p d-f a-i-c j-c-e g-m m-bk-m">
+                                            <div className="f-g-1 of-y-a s-bar-auto p-r-s">
+                                                <Table
+                                                    loading={fetchingSystemUsers}
+                                                    dataSource={filteredSystemUsers}
+                                                    rowKey="Id"
+                                                    pagination={false}
+                                                    columns={[
+                                                        { title: 'Name', dataIndex: 'Name', key: 'Name', sorter: (a, b) => a.Name.localeCompare(b.Name) },
+                                                        { title: 'Username', dataIndex: 'Username', key: 'Username', sorter: (a, b) => a.Username.localeCompare(b.Username) },
+                                                        { title: 'Profile', dataIndex: 'ProfileName', key: 'ProfileName', sorter: (a, b) => a.ProfileName.localeCompare(b.ProfileName) },
+                                                        { title: 'Role', dataIndex: 'RoleName', key: 'RoleName', sorter: (a, b) => (a.RoleName || '').localeCompare(b.RoleName || '') }
+                                                    ]}
+                                                />
+                                            </div>
+                                        </div>
+                                    )
+                                ) : (
+                                    !selectedObjectForAnalysis || (selectedObjectPermsForAnalysis.length === 0 && selectedFieldsForAnalysis.length === 0) ? (
+                                        <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c c-b-4">
+                                            <CloudServerOutlined style={{ fontSize: 80 }} />
+                                            <div className="fs-18-px m-t-m">Select an object and criteria to analyze</div>
+                                        </div>
+                                    ) : !dataFetched ? (
+                                        <div className="w-100-p h-100-p d-f f-d-c a-i-c j-c-c">
+                                            <div className="p-a-xl b-rad-16-px d-f f-d-c a-i-c g-l animate-in zoom-in p-a-m">
+                                                <div className="p-a-m bg-c-prim-xxl b-rad-50-p">
+                                                    <RocketOutlined style={{ fontSize: 60, color: 'var(--c-prim)' }} />
+                                                </div>
+                                                <div className="t-a-c">
+                                                    <h3 className="fs-24-px fw-700 c-b-1 m-b-s">Ready to Analyze?</h3>
+                                                    <p className="fs-14-px c-b-3 m-b-xl">
+                                                        Analyze access for <strong>{`${objects.find(o => o.name === selectedObjectForAnalysis)?.label} (${selectedObjectForAnalysis})`}</strong> based on your selected criteria.
+                                                    </p>
+                                                </div>
                                                 <button
-                                                    className="prime-button animate-in slide-in-right p-i-m"
-                                                    onClick={() => fetchObjectAccessData(selectedObjectForAnalysis, selectedObjectPermsForAnalysis, selectedFieldsForAnalysis, selectedFieldPermsForAnalysis, objPermsLogic, fieldPermsLogic)}
+                                                    className="prime-button animate-pulse p-i-xl fs-14-px fw-700"
+                                                    style={{ height: 32, borderRadius: 16 }}
                                                     disabled={fetchingSystemUsers}
+                                                    onClick={() => fetchObjectAccessData(selectedObjectForAnalysis, selectedObjectPermsForAnalysis, selectedFieldsForAnalysis, selectedFieldPermsForAnalysis)}
                                                 >
-                                                    {fetchingSystemUsers ? <Spin size="small" /> : <><ReloadOutlined /> RE-EVALUATE</>}
+                                                    {fetchingSystemUsers ? <Spin size="large" /> : <><SearchOutlined /> START ANALYSIS</>}
                                                 </button>
                                             </div>
-                                        )}
+                                        </div>
+                                    ) : (
+                                        <div className="h-100-p d-f f-d-c animate-in p-t-m">
+                                            <div className="m-b-m p-b-m b-b-1-px b-c-b-5">
+                                                <div className="d-f a-i-f j-c-s-b m-b-m">
+                                                    <div className="d-f f-d-c">
+                                                        <div className="fs-12-px c-b-3 fw-600 t-t-ucp">Analysis Scope for</div>
+                                                        <h2 className="fs-24-px fw-800 m-a-0 c-prim d-f a-i-c g-s">
+                                                            {objects.find(ele => ele.name === selectedObjectForAnalysis)?.label}
+                                                            <span className="fs-14-px fw-600 c-b-3 m-l-s">({filteredSystemUsers.length} Users found)</span>
+                                                        </h2>
+                                                        {selectedObjectPermsForAnalysis.length > 0 && <div className="d-f f-w-w g-s m-t-xs">
+                                                            {selectedObjectPermsForAnalysis.map(p => (
+                                                                <Tag key={p} color="blue" className="fs-11-px m-a-0 border-none bg-c-prim-xl c-prim fw-600">{p}</Tag>
+                                                            ))}
+                                                            <Tag color="default" className="fs-10-px m-a-0 fw-700 m-l-a">{objPermsLogic == 'OR' ? 'ANY' : 'ALL'}</Tag>
+                                                        </div>}
+                                                    </div>
+                                                </div>
 
-                                    </div>
-                                    <div className="f-g-1 of-y-a s-bar-auto p-r-s">
-                                        <Table
-                                            loading={fetchingSystemUsers}
-                                            dataSource={filteredSystemUsers}
-                                            rowKey="Id"
-                                            pagination={false}
-                                            columns={[
-                                                { title: 'Name', dataIndex: 'Name', key: 'Name', sorter: (a, b) => a.Name.localeCompare(b.Name) },
-                                                { title: 'Username', dataIndex: 'Username', key: 'Username', sorter: (a, b) => a.Username.localeCompare(b.Username) },
-                                                { title: 'Profile', dataIndex: 'ProfileName', key: 'ProfileName', sorter: (a, b) => a.ProfileName.localeCompare(b.ProfileName) },
-                                                { title: 'Role', dataIndex: 'RoleName', key: 'RoleName', sorter: (a, b) => (a.RoleName || '').localeCompare(b.RoleName || '') }
-                                            ]}
-                                        />
-                                    </div>
-                                </div>
-                            )
-                        )
+                                                {selectedFieldsForAnalysis.length > 0 && (
+                                                    <div className="m-t-s p-a-s bg-c-wb-1 b-rad-6-px b-1-px b-c-b-5 dashed w-100-p animate-in fade-in">
+                                                        <div className="d-f a-i-c g-s m-b-s">
+                                                            <div className="fs-11-px fw-700 c-b-3 t-t-ucp m-r-s">Fields ({selectedFieldsForAnalysis.length}):</div>
+                                                            <div className="d-f f-w-w g-s">
+                                                                <div className="fs-12-px c-b-3 t-o-e" style={{ maxWidth: 400 }}>
+                                                                    {selectedFieldsForAnalysis.join(', ')}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="d-f a-i-c g-s">
+                                                            <Tag color="grey" className="fs-11-px m-a-0 border-none bg-c-cyan-xl c-cyan p-i-m fw-600">
+                                                                <CheckCircleOutlined /> Field Permissions: {selectedFieldPermsForAnalysis.join(` ${fieldPermsLogic} `) || 'N/A'}
+                                                            </Tag>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {needsReEvaluation && (
+                                                    <div className="min-w-100-p d-f a-i-c j-c-e g-m m-bk-m">
+                                                        <button
+                                                            className="prime-button animate-in slide-in-right p-i-m"
+                                                            onClick={() => fetchObjectAccessData(selectedObjectForAnalysis, selectedObjectPermsForAnalysis, selectedFieldsForAnalysis, selectedFieldPermsForAnalysis, objPermsLogic, fieldPermsLogic)}
+                                                            disabled={fetchingSystemUsers}
+                                                        >
+                                                            {fetchingSystemUsers ? <Spin size="small" /> : <><ReloadOutlined /> RE-EVALUATE</>}
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                            </div>
+                                            <div className="f-g-1 of-y-a s-bar-auto p-r-s">
+                                                <Table
+                                                    loading={fetchingSystemUsers}
+                                                    dataSource={filteredSystemUsers}
+                                                    rowKey="Id"
+                                                    pagination={false}
+                                                    columns={[
+                                                        { title: 'Name', dataIndex: 'Name', key: 'Name', sorter: (a, b) => a.Name.localeCompare(b.Name) },
+                                                        { title: 'Username', dataIndex: 'Username', key: 'Username', sorter: (a, b) => a.Username.localeCompare(b.Username) },
+                                                        { title: 'Profile', dataIndex: 'ProfileName', key: 'ProfileName', sorter: (a, b) => a.ProfileName.localeCompare(b.ProfileName) },
+                                                        { title: 'Role', dataIndex: 'RoleName', key: 'RoleName', sorter: (a, b) => (a.RoleName || '').localeCompare(b.RoleName || '') }
+                                                    ]}
+                                                />
+                                            </div>
+                                        </div>
+                                    )
+                                )
+                            )}
+                        </>
                     )}
                 </section>
             </main>
@@ -1489,3 +1665,13 @@ function App() {
 }
 
 export default App;
+
+
+const errorCodeMessages = () => {
+    return {
+        'INVALID_SESSION_ID': 'Session has been expired !!!',
+        'INVALID_TYPE': `It seems like you don't have access to the developer console! Ask your system administration for the permission`,
+        'API_CURRENTLY_DISABLED': 'API Disabled for the current User!!!',
+        'NO_INTERNET': 'No Internet Connection !!!',
+    }
+}

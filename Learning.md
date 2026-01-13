@@ -18,3 +18,12 @@
     - Muting cannot reduce profile permissions
     - Muting only overrides permissions added by the group
     - Salesforce still applies most permissive access overall
+
+* Salesforce (query) used
+    - PermissionSet (it hold all permission for access value, Profile and PermissionSetGroup are also consider as PermissionSet to indentify the permission)
+    - PermissionSetAssignment (it hold all permission set assigned to user)
+    - PermissionSetGroup (it hold all permission set group assigned to user)
+    - PermissionSetGroupComponent (it hold all permission set group component assigned to user)
+    - ObjectPermissions (it hold all object permission for user)
+    - FieldPermissions (it hold all field permission for user)
+    - MutePermissionSet (it hold all muted permission set for user)

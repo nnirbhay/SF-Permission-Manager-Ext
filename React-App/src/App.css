@@ -5,6 +5,11 @@
   overflow: hidden;
 }
 
+.loading-container {
+  backdrop-filter: blur(1px);
+  background: #d5d5d56b;
+}
+
 .main-app {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   color: var(--color-b-1);
@@ -13,8 +18,8 @@
 }
 
 .app-header {
-  height: 60px;
-  max-height: 60px;
+  height: 2rem;
+  max-height: 2rem;
   background: linear-gradient(90deg, #0d1b2a 0%, #1b263b 100%);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
